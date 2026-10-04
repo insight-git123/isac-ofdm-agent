@@ -2,11 +2,15 @@
 from typing import Dict, List
 
 # 依据 TS 38.211 v18.4.0 Table 4.2-1
+# 依据 TS 38.211 v18.4.0 Table 4.2-1
 EXPECTED_NUMEROLOGY = {
     0: {"scs_khz": 15, "cp_types": ["normal"]},
     1: {"scs_khz": 30, "cp_types": ["normal"]},
     2: {"scs_khz": 60, "cp_types": ["normal", "extended"]},
     3: {"scs_khz": 120, "cp_types": ["normal"]},
+    4: {"scs_khz": 240, "cp_types": ["normal"]},   # Rel-18 新增
+    5: {"scs_khz": 480, "cp_types": ["normal"]},   # Rel-18 新增
+    6: {"scs_khz": 960, "cp_types": ["normal"]},   # Rel-18 新增
 }
 
 # T_CP = 144 * kappa * 2^(-mu) * T_c, kappa=64, T_c ≈ 0.509 ns

@@ -18,7 +18,7 @@ from src.validation.validators import (
     compute_normal_cp_us,
 )
 
-RAW = ROOT / "data" / "raw" / "sample_ts38211.txt"
+RAW = ROOT / "data" / "raw" / "ts38211.pdf"
 PROCESSED = ROOT / "data" / "processed" / "ts38211_parsed.txt"
 OUT = ROOT / "outputs" / "task1"
 SOURCES = yaml.safe_load((ROOT / "config" / "sources.yaml").read_text(encoding="utf-8"))
@@ -32,17 +32,19 @@ def get_source(sid: str) -> dict:
 
 
 def extract_numerology(text: str):
-    """从 Table 4.2-1 区域抽取 mu / SCS / CP 类型。"""
+    """从 Table 4.2-1 区域抽取 mu / SCS / CP 类型（适配真实 3GPP PDF 排版）。"""
     retriever = Retriever(text)
-    # 找到表头行
+    # 使用“4.2 Numerologies”作为起点，“4.3 Frame structure”作为终点
     table_lines = retriever.extract_section(
-        "Table 4.2-1", "Only the numerology"
+        "4.2 Numerologies", "4.3 Frame structure"
     )
+    
     rows = []
     for line in table_lines:
-        # 匹配形如 "0     15    Normal" / "2   60   Normal, Extended"
-        m = re.match(
-            r"^\s*(\d+)\s+(\d+)\s+(Normal(?:\s*,\s*Extended)?)\s*$",
+        # 注意：这里改用 re.search，兼容 PDF 解析后数字与文字间的各种空格
+        # 匹配形如 "0 15 Normal" / "2 60 Normal,Extended"
+        m = re.search(
+            r"(\d+)\s+(\d+)\s+(Normal(?:\s*,\s*Extended)?)",
             line, flags=re.IGNORECASE,
         )
         if not m:
@@ -50,12 +52,14 @@ def extract_numerology(text: str):
         mu = int(m.group(1))
         scs = int(m.group(2))
         cp_raw = m.group(3).lower()
+        
         cp_types = []
         if "normal" in cp_raw:
             cp_types.append("normal")
         if "extended" in cp_raw:
             cp_types.append("extended")
         rows.append({"mu": mu, "scs_khz": scs, "cp_types": cp_types})
+        
     return rows
 
 

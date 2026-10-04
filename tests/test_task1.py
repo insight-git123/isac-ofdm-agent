@@ -19,7 +19,7 @@ def test_entry1_numerology_table():
     """条目1：SCS-CP 映射正确，扩展CP仅 μ=2。"""
     text = parse(RAW)
     rows = enrich(extract_numerology(text))
-    assert len(rows) == 4
+    assert len(rows) == 7
     by_mu = {r["mu"]: r for r in rows}
     assert by_mu[0]["scs_khz"] == 15 and by_mu[0]["cp_types"] == ["normal"]
     assert by_mu[1]["scs_khz"] == 30 and by_mu[1]["cp_types"] == ["normal"]
