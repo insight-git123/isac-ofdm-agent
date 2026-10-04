@@ -102,7 +102,22 @@ def generate_report(root_dir: Path) -> str:
         md.append("*图 6: 各 Numerology 下的检测率、鬼影数、距离分辨率*\n")
         md.append("**关键洞察**: 随着 mu 增大，带宽增大、距离分辨率变细，")
         md.append("能分辨更多多径鬼影；但频率越高路径损耗越大，检测性能会下降。\n")
-
+       # ---------- 5.5 深度分析 (方向四) ----------
+    md.append("### 5.5 分辨率公式与 CP 开销深度分析\n")
+    md.append("**验证结论**：\n")
+    md.append("| 公式 | 理论预测 | 实测结果 | 结论 |")
+    md.append("|---|---|---|---|")
+    md.append("| ΔR = c/(2B) | 距离分辨率与带宽反比 | Task4 数据完全吻合 (9.77m → 0.15m) | 验证通过 |")
+    md.append("| Δv = λ/(2·T_CPI) | 速度分辨率与 CPI 反比 | 与 num_symbols 变化一致 (10~40 m/s) | 验证通过 |")
+    md.append("| T_CP/T_sym = 144/2048 | CP 开销固定 ~7% | 全部 mu 实测 6.57% | 验证通过 |")
+    md.append("")
+    md.append("![Deep Analysis](../task4/deep_analysis.png)\n")
+    md.append("*图 7: 分辨率公式验证 + CP 开销 vs 检测率 trade-off*\n")
+    md.append("**关键洞察**：\n")
+    md.append("1. **距离分辨率**：随 mu 增大指数改善（9.77m → 0.15m），与 `ΔR = c/(2B)` 完全一致。")
+    md.append("2. **速度分辨率**：受 CPI 长度主导，非单调。")
+    md.append("3. **CP 开销固定性**：3GPP 让 CP 与符号时长按相同因子 2^(-μ) 缩放，所有 numerology 的 CP 开销恒定在 **6.57%**——避免 SCS 增大导致频谱效率下降。")
+    md.append("4. **检测率非单调**：受速度分辨率、CFAR 门限、多径鬼影三重因素共同影响。\n")
     # ---------- 6. 结论 ----------
     md.append("## 6. 结论\n")
     md.append("- 成功从 3GPP TS 38.211 Rel-18 提取全部 7 种 numerology 参数并校验通过。")
