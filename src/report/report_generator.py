@@ -40,12 +40,17 @@ def generate_report(root_dir: Path) -> str:
             md.append(f"| {num['mu']} | {num['scs_khz']} | {cp_types} | {cp_dur} |")
         md.append("\n")
 
-    # ---------- 3. OFDM 波形 ----------
+           # ---------- 3. OFDM 波形 ----------
     md.append("## 3. OFDM 波形生成 (Task2)\n")
-    md.append("基于 mu=0 (15kHz) 生成的时域波形图：\n")
-    md.append("![OFDM Waveform](../task2/ofdm_waveform_mu0.png)\n")
+    task2_dir = root_dir / "outputs" / "task2"
+    waveform_imgs = sorted(task2_dir.glob("ofdm_waveform_mu*.png")) if task2_dir.exists() else []
+    if waveform_imgs:
+        # 直接构造相对路径 ../task2/xxx.png
+        rel = f"../task2/{waveform_imgs[-1].name}"
+        md.append(f"![OFDM Waveform]({rel})\n")
+    else:
+        md.append("*(未找到波形图，请先运行 Task2)*\n")
     md.append("*图 1: OFDM 时域波形 (实部/虚部)*\n")
-
     # ---------- 4. ISAC 感知性能 ----------
     md.append("## 4. ISAC 感知性能分析 (Task3)\n")
     md.append("### 4.1 实验设置\n")
