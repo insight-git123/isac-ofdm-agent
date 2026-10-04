@@ -1,47 +1,194 @@
-"""Task4 端到端：参数扫描 + 生成报告"""
+"""Task4 (MC 版): ISAC 感知性能扫描 - 每 mu 运行 N 次取平均。"""
 import sys
 import json
 import yaml
+import numpy as np
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.sweep.numerology_sweep import run_sweep, plot_results
+from src.simulation.radar_processing import RadarSimulator
+from src.simulation.cfar import ca_cfar_2d
+
+
+def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
+                       r_gate=3, v_gate=3):
+    rows, cols = np.where(detected)
+    if len(rows) == 0:
+        return [], []
+    points = sorted(zip(rows, cols), key=lambda p: -rdm_mag[p[0], p[1]])
+    clustered = []
+    for (r, c) in points:
+        if not any(abs(r - cr) <= r_gate and abs(c - cc) <= v_gate
+                   for cr, cc in clustered):
+            clustered.append((r, c))
+    det_ranges = [range_axis[r] for r, _ in clustered]
+    det_velocities = [velocity_axis[c] for _, c in clustered]
+    return det_ranges, det_velocities
+
+
+def run_single_mu(mu, scs_khz, cp_duration_us, targets,
+                  snr_db=20, use_swerling=True, use_multipath=True,
+                  n_trials=10, base_seed=42):
+    """对单个 mu 运行 N 次蒙特卡洛，取平均检测性能。"""
+    # ★ 符号数自适应：保证速度分辨率 >= 20 m/s
+    if scs_khz <= 60:
+        num_sym = 64
+    elif scs_khz <= 240:
+        num_sym = 256
+    elif scs_khz <= 480:
+        num_sym = 512
+    else:
+        num_sym = 2048     # mu=6 使用 2048 符号
+
+    hits_list, ghosts_list = [], []
+    range_res_final = None
+    bandwidth_final = None
+    velocity_res_final = None
+
+    for trial in range(n_trials):
+        np.random.seed(base_seed + trial)
+
+        sim = RadarSimulator(scs_khz=scs_khz, fft_size=1024,
+                             num_symbols=num_sym, fc_ghz=3.5)
+        bandwidth_final = sim.bandwidth
+        range_res_final = sim.c / (2 * sim.bandwidth)
+        # 速度分辨率 = c / (2*fc*CPI)
+        cpi = num_sym * sim.symbol_duration
+        velocity_res_final = sim.c / (2 * sim.fc_ghz * 1e9 * cpi)
+
+        X, Y = sim.generate_echo(targets=targets, snr_db=snr_db,
+                                  use_swerling=use_swerling,
+                                  use_multipath=use_multipath)
+        rdm_mag, range_axis, velocity_axis = sim.compute_rdm(X, Y)
+
+        detected = ca_cfar_2d(rdm_mag, guard_cells=2, train_cells=4, pfa=1e-2)
+        det_ranges, det_velocities = cluster_detections(
+            rdm_mag, detected, range_axis, velocity_axis, r_gate=3, v_gate=3
+        )
+
+        # ★ 自适应匹配容差
+        R_TOL = max(5.0, 2 * range_res_final)
+        V_TOL = max(20.0, 2 * velocity_res_final)
+        true_hits = 0
+        for tgt in targets:
+            for (r, v) in zip(det_ranges, det_velocities):
+                if abs(r - tgt["range"]) <= R_TOL and abs(v - tgt["velocity"]) <= V_TOL:
+                    true_hits += 1
+                    break
+
+        hits_list.append(true_hits)
+        ghosts_list.append(len(det_ranges) - true_hits)
+
+    avg_hits = float(np.mean(hits_list))
+    avg_ghosts = float(np.mean(ghosts_list))
+    std_hits = float(np.std(hits_list))
+
+    return {
+        "mu": mu,
+        "scs_khz": scs_khz,
+        "cp_duration_us": cp_duration_us,
+        "num_symbols": num_sym,
+        "bandwidth_mhz": round(bandwidth_final / 1e6, 2),
+        "range_res_m": round(range_res_final, 2),
+        "velocity_res_ms": round(velocity_res_final, 2),
+        "n_trials": n_trials,
+        "avg_hits": round(avg_hits, 2),
+        "std_hits": round(std_hits, 2),
+        "avg_ghosts": round(avg_ghosts, 2),
+        "detection_rate": round(avg_hits / len(targets), 3),
+        "hits_list": hits_list,
+    }
+
 
 def main():
     params_path = ROOT / "outputs" / "task1" / "params.yaml"
-    if not params_path.exists():
-        print("错误: 找不到 params.yaml，请先运行 Task1")
-        return 1
-
     with open(params_path, "r", encoding="utf-8") as f:
         params = yaml.safe_load(f)
 
-    print("[Task4] 开始 numerology 参数扫描...")
-    results = run_sweep(params, fft_size=1024)
+    targets = [
+        {"range": 150.0, "velocity": 30.0, "rcs": 1.0},
+        {"range": 300.0, "velocity": -20.0, "rcs": 0.5},
+        {"range": 450.0, "velocity": 0.0, "rcs": 0.8},
+    ]
+
+    N_TRIALS = 10
+    print(f"[Task4] ISAC 感知性能扫描 (Swerling-I + TDL Multipath)")
+    print(f"  蒙特卡洛: 每个 mu 运行 {N_TRIALS} 次取平均")
+    print(f"  匹配容差: 自适应 (range_res 和 velocity_res 相关)")
+    print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}\n")
+
+    results = []
+    for num in params["numerology"]:
+        mu = num["mu"]
+        scs_khz = num["scs_khz"]
+        cp_dur = num["cp_duration_us"]
+        print(f"  [mu={mu}] SCS={scs_khz}kHz, {N_TRIALS} 次 MC 仿真中...")
+        res = run_single_mu(mu, scs_khz, cp_dur, targets, n_trials=N_TRIALS)
+        results.append(res)
+        print(f"    平均命中: {res['avg_hits']:.2f}/3 (±{res['std_hits']:.2f}), "
+              f"平均鬼影: {res['avg_ghosts']:.2f}, "
+              f"距离分辨率: {res['range_res_m']}m, "
+              f"速度分辨率: {res['velocity_res_ms']}m/s")
 
     out_dir = ROOT / "outputs" / "task4"
     out_dir.mkdir(parents=True, exist_ok=True)
+    json_path = out_dir / "isac_sweep_report.json"
+    json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False),
+                          encoding="utf-8")
 
-    # 1. 保存 JSON 报告
-    report_path = out_dir / "sweep_report.json"
-    report_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+    mus = [r["mu"] for r in results]
+    ghosts = [r["avg_ghosts"] for r in results]
+    range_res = [r["range_res_m"] for r in results]
 
-    # 2. 绘制柱状图
-    plot_path = out_dir / "cp_overhead.png"
-    plot_results(results, plot_path)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-    # 3. 终端打印
-    print(f"{'μ':<4} {'SCS(kHz)':<10} {'CP(us)':<10} {'CP Samples':<12} {'Overhead':<10}")
-    print("-" * 50)
+    det_pct = [r["avg_hits"] / 3 * 100 for r in results]
+    det_err = [r["std_hits"] / 3 * 100 for r in results]
+    axes[0].bar(mus, det_pct, yerr=det_err, color='steelblue', capsize=5)
+    axes[0].set_xlabel("mu"); axes[0].set_ylabel("Detection Rate (%)")
+    axes[0].set_title(f"Target Detection Rate ({N_TRIALS} MC trials)")
+    axes[0].set_xticks(mus); axes[0].set_ylim(0, 110)
+    for i, v in enumerate(det_pct):
+        axes[0].text(mus[i], v + 4, f"{v:.0f}%", ha='center')
+
+    axes[1].bar(mus, ghosts, color='coral')
+    axes[1].set_xlabel("mu"); axes[1].set_ylabel("Avg Ghost Count")
+    axes[1].set_title("Multipath Ghosts")
+    axes[1].set_xticks(mus)
+    for i, v in enumerate(ghosts):
+        axes[1].text(mus[i], v + 0.1, f"{v:.1f}", ha='center')
+
+    axes[2].bar(mus, range_res, color='seagreen')
+    axes[2].set_xlabel("mu"); axes[2].set_ylabel("Range Resolution (m)")
+    axes[2].set_title("Range Resolution")
+    axes[2].set_xticks(mus)
+    axes[2].set_yscale('log')
+    for i, v in enumerate(range_res):
+        axes[2].text(mus[i], v * 1.15, f"{v:.2f}", ha='center', fontsize=8)
+
+    plt.tight_layout()
+    plot_path = out_dir / "isac_sweep_summary.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+
+    print("\n" + "=" * 95)
+    print(f"{'mu':<4}{'SCS':<8}{'BW(MHz)':<10}{'Res(m)':<10}"
+          f"{'Vres(m/s)':<12}{'命中':<12}{'鬼影':<10}{'检测率':<8}")
+    print("-" * 95)
     for r in results:
-        print(f"{r['mu']:<4} {r['scs_khz']:<10} {r['cp_duration_us']:<10} {r['cp_samples']:<12} {r['cp_overhead']*100:.2f}%")
+        hit_str = f"{r['avg_hits']:.2f}±{r['std_hits']:.2f}"
+        print(f"{r['mu']:<4}{r['scs_khz']:<8}{r['bandwidth_mhz']:<10}"
+              f"{r['range_res_m']:<10}{r['velocity_res_ms']:<12}"
+              f"{hit_str:<12}{r['avg_ghosts']:<10}{r['detection_rate']*100:.0f}%")
+    print("=" * 95)
 
-    print(f"\n[output] 扫描报告: {report_path}")
-    print(f"[output] 开销对比图: {plot_path}")
-    print("[Task4] 完成！")
+    print(f"\n[output] JSON: {json_path}")
+    print(f"[output] 汇总图: {plot_path}")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
