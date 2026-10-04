@@ -1,71 +1,136 @@
-"""Task3 端到端：ISAC 感知仿真 -> 距离-多普勒图"""
+"""Task3: 频域多目标 ISAC 感知 + CFAR + NMS + Swerling-I + TDL 多径"""
 import sys
-from pathlib import Path
 import yaml
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.simulation.radar_processing import RadarSimulator
+from src.simulation.cfar import ca_cfar_2d
+
+
+def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
+                       r_gate: int = 3, v_gate: int = 3):
+    """对 CFAR 检测结果做非极大值抑制 (NMS) 聚类。"""
+    rows, cols = np.where(detected)
+    if len(rows) == 0:
+        return [], []
+
+    points = sorted(zip(rows, cols), key=lambda p: -rdm_mag[p[0], p[1]])
+    clustered = []
+    for (r, c) in points:
+        if not any(abs(r - cr) <= r_gate and abs(c - cc) <= v_gate
+                   for cr, cc in clustered):
+            clustered.append((r, c))
+
+    det_ranges = [range_axis[r] for r, _ in clustered]
+    det_velocities = [velocity_axis[c] for _, c in clustered]
+    return det_ranges, det_velocities
+
 
 def main():
-    params_path = ROOT / "outputs" / "task1" / "params.yaml"
-    if not params_path.exists():
-        print("错误: 找不到 params.yaml，请先运行 Task1")
-        return 1
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mu", type=int, default=0, help="Numerology mu (0-6)")
+    parser.add_argument("--swerling", action="store_true",
+                        help="启用 Swerling-I RCS 波动")
+    parser.add_argument("--multipath", action="store_true",
+                        help="启用 TDL 多径信道")
+    args = parser.parse_args()
 
+    # 1. 读取 Task1 参数
+    params_path = ROOT / "outputs" / "task1" / "params.yaml"
     with open(params_path, "r", encoding="utf-8") as f:
         params = yaml.safe_load(f)
 
-    # 选用 mu=0 (SCS=15kHz) 作为仿真基础
-    target_num = next((n for n in params["numerology"] if n["mu"] == 0), None)
+    target_num = next((n for n in params["numerology"] if n["mu"] == args.mu), None)
+    if not target_num:
+        print(f"错误: 未找到 mu={args.mu} 的参数")
+        return 1
+
     scs_khz = target_num["scs_khz"]
 
-    # 设定雷达参数
-    fft_size = 1024
-    num_symbols = 64
-    sim = RadarSimulator(scs_khz=scs_khz, fft_size=fft_size, num_symbols=num_symbols, fc_ghz=3.5)
+    # 2. 初始化雷达仿真器
+    num_sym = 64 if scs_khz <= 60 else 512
+    sim = RadarSimulator(scs_khz=scs_khz, fft_size=1024,
+                         num_symbols=num_sym, fc_ghz=3.5)
 
-    print(f"[Task3] ISAC 感知仿真启动")
-    print(f"  参数: SCS={scs_khz}kHz, FFT={fft_size}, Symbols={num_symbols}")
+    tag_list = []
+    if args.swerling:  tag_list.append("Swerling")
+    if args.multipath: tag_list.append("Multipath")
+    tag_str = "+".join(tag_list) if tag_list else "Baseline"
+
+    print(f"[Task3] ISAC 感知仿真 (mu={args.mu}, SCS={scs_khz}kHz, {tag_str})")
+    print(f"  符号数: {num_sym}, CPI: {num_sym * sim.symbol_duration * 1e6:.1f} us")
     print(f"  带宽: {sim.bandwidth/1e6:.2f} MHz, 距离分辨率: {sim.c/(2*sim.bandwidth):.2f} m")
 
-    # 设定目标：距离 150m, 速度 30m/s (约 108km/h)
-    true_range, true_velocity = 150.0, 30.0
-    print(f"  目标真值: 距离={true_range}m, 速度={true_velocity}m/s")
+    # 3. 多目标真值
+    targets = [
+        {"range": 150.0, "velocity": 30.0, "rcs": 1.0},
+        {"range": 300.0, "velocity": -20.0, "rcs": 0.5},
+        {"range": 450.0, "velocity": 0.0, "rcs": 0.8},
+    ]
+    print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}")
 
-    # 生成回波并计算 RDM
-    Y = sim.generate_echo(target_range=true_range, target_velocity=true_velocity, snr_db=20)
-    rdm, range_axis, velocity_axis = sim.compute_rdm(Y)
+    # 4. 生成回波 + RDM
+    X, Y = sim.generate_echo(
+        targets=targets, snr_db=20,
+        use_swerling=args.swerling,
+        use_multipath=args.multipath
+    )
+    rdm_mag, range_axis, velocity_axis = sim.compute_rdm(X, Y)
+    rdm_db = 20 * np.log10(rdm_mag / np.max(rdm_mag) + 1e-12)
 
-    # 归一化并转 dB
-    rdm_db = 20 * np.log10(np.abs(rdm) / np.max(np.abs(rdm)) + 1e-12)
+    # 5. CFAR 检测
+    detected = ca_cfar_2d(rdm_mag, guard_cells=2, train_cells=4, pfa=1e-3)
+    raw_count = int(np.sum(detected))
 
-    # 绘制 RDM
+    # 6. NMS 聚类
+    det_ranges, det_velocities = cluster_detections(
+        rdm_mag, detected, range_axis, velocity_axis, r_gate=3, v_gate=3
+    )
+
+    print(f"  CFAR 原始检测点: {raw_count}, NMS 聚类后: {len(det_ranges)}")
+    for i, (r, v) in enumerate(zip(det_ranges, det_velocities)):
+        print(f"    [{i+1}] 距离={r:.1f}m, 速度={v:.1f}m/s")
+
+    # 7. 绘图
     out_dir = ROOT / "outputs" / "task3"
     out_dir.mkdir(parents=True, exist_ok=True)
-    plot_path = out_dir / "range_doppler_map.png"
+    suffix = "_" + "_".join(t.lower() for t in tag_list) if tag_list else ""
+    plot_path = out_dir / f"rdm_mu{args.mu}{suffix}_cfar.png"
 
     plt.figure(figsize=(10, 6))
     plt.imshow(rdm_db, aspect='auto', cmap='jet',
-               extent=[velocity_axis[0], velocity_axis[-1], range_axis[0], range_axis[-1]],
+               extent=[velocity_axis[0], velocity_axis[-1],
+                       range_axis[0], range_axis[-1]],
                origin='lower', vmin=-40, vmax=0)
     plt.colorbar(label='Normalized Magnitude (dB)')
-    plt.title(f"ISAC Range-Doppler Map (Target: {true_range}m, {true_velocity}m/s)")
+
+    plt.scatter(det_velocities, det_ranges,
+                facecolors='none', edgecolors='white', s=80,
+                label='CFAR + NMS')
+
+    for tgt in targets:
+        plt.axvline(tgt["velocity"], color='cyan', linestyle='--', alpha=0.4)
+        plt.axhline(tgt["range"], color='cyan', linestyle='--', alpha=0.4)
+
+    plt.title(f"ISAC RDM (mu={args.mu}, SCS={scs_khz}kHz, {tag_str})")
     plt.xlabel("Velocity (m/s)")
     plt.ylabel("Range (m)")
-    plt.axvline(true_velocity, color='white', linestyle='--', alpha=0.6, label='True Velocity')
-    plt.axhline(true_range, color='white', linestyle='--', alpha=0.6, label='True Range')
-    plt.legend(loc='upper right')
+    plt.xlim(-150, 150)
+    plt.ylim(0, 600)
+    plt.legend()
     plt.tight_layout()
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    print(f"[output] 距离-多普勒图已保存至: {plot_path}")
-    print("[Task3] 完成！")
+    print(f"[output] {plot_path}")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
