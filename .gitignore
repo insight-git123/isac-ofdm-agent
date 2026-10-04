@@ -18,4 +18,4 @@ Thumbs.db
 # 自动生成的中间产物（可根据需要决定是否保留）
 data/processed/
 outputs/
-config/params.yaml
+config/params.yamldata/raw/*.pdf
