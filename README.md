@@ -42,6 +42,18 @@ OFDM 波形生成 → 严格时域脉冲压缩 → 3GPP TDL-A 标准多径信道
 
 ### 多径鬼影抑制 (mu=3, Swerling + TDL-A)
 
+使用标准 3GPP TR 38.901 TDL-A 信道（23 抽头，RMS 时延扩展 30ns，最大时延约 290ns）。
+在 mu=3 的 1.22m 距离分辨率下，多径时延扩展约 **43.5m**（≈ 35 个距离门），
+因此每个真实目标在 RDM 上呈现为 **"多径簇"** 而非单点：
+
+- **绿色圈** = 簇中心（聚类后的候选真实目标）
+- **红色叉** = 被鬼影抑制算法过滤掉的多径点
+
+![Ghost Suppression](outputs/task3/rdm_mu3_swerling_multipath_ghostsuppress_cfar.png)
+
+**物理含义**：TDL-A 的 23 个抽头分布在 43.5m 范围内，导致单目标在 RDM 上呈现宽簇。
+这是**标准多径信道的正确行为**，不是算法缺陷——真实 ISAC 系统也需联合时域/角度域
+处理来抑制这类多径。
 ![Ghost Suppression](outputs/task3/rdm_mu3_swerling_multipath_ghostsuppress_cfar.png)
 
 ### 分辨率公式验证
