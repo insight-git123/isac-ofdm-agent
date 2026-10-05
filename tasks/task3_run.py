@@ -97,14 +97,17 @@ def main():
     detected = ca_cfar_2d(rdm_mag, guard_cells=2, train_cells=4, pfa=1e-2)
     raw_count = int(np.sum(detected))
 
-    # 6. NMS 聚类
+    range_res_m = sim.c / (2 * sim.bandwidth)       # ← 新增
+    r_gate_phys = 45.0                               # ← 新增
+    r_gate = max(3, int(round(r_gate_phys / range_res_m)))  # ← 新增
+    v_gate = 3                                       # ← 新增
     det_ranges, det_velocities, det_mags = cluster_detections(
-        rdm_mag, detected, range_axis, velocity_axis, r_gate=3, v_gate=3
+        rdm_mag, detected, range_axis, velocity_axis,
+        r_gate=r_gate, v_gate=v_gate
     )
+    print(f"  [NMS] r_gate={r_gate} 门 (物理 ~{r_gate * range_res_m:.1f}m), v_gate={v_gate}")
 
     print(f"\n  CFAR 原始检测点: {raw_count}, NMS 聚类后: {len(det_ranges)}")
-    for i, (r, v) in enumerate(zip(det_ranges, det_velocities)):
-        print(f"    [{i+1}] 距离={r:.1f}m, 速度={v:.1f}m/s")
 
     # 7. 鬼影抑制 (可选)
     true_idx, ghost_idx = [], []

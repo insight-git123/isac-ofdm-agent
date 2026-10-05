@@ -40,7 +40,7 @@ def suppress_ghosts(det_ranges, det_velocities, det_mags=None,
             if mags_norm[i] >= mags_norm[j] * mag_ratio:
                 continue
             # 约束3: 指纹物理范围
-            if not (2.0 <= dr <= 60.0):
+            if not (2.0 <= dr <= 200.0):
                 continue
             if dv > 40.0:
                 continue

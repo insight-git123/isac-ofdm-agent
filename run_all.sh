@@ -11,8 +11,8 @@ elif [ -d ".venv/bin" ]; then
     source .venv/bin/activate
 fi
 
-echo -e "\n[1/8] Task1: 3GPP 参数提取..."
-python tasks/task1_run.py
+echo -e "\n[1/8] Task1: 3GPP 参数提取 (使用样例文本)..."
+python tasks/task1_run.py --raw data/raw/sample_ts38211.txt
 
 echo -e "\n[2/8] Task2: OFDM 波形生成..."
 python tasks/task2_run.py --mu 3
