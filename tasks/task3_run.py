@@ -16,6 +16,7 @@ from src.simulation.ghost_suppression import suppress_ghosts
 
 def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
                        r_gate=3, v_gate=3):
+    """NMS 聚类，返回 (ranges, velocities, mags)。"""
     rows, cols = np.where(detected)
     if len(rows) == 0:
         return [], [], []
@@ -45,7 +46,6 @@ def main():
                         help="随机种子 (默认 42，保证可复现)")
     args = parser.parse_args()
 
-    # 固定随机种子, 保证结果可复现
     np.random.seed(args.seed)
 
     # 1. 读取 Task1 参数
@@ -84,30 +84,39 @@ def main():
     ]
     print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}")
 
-    # 4. 生成回波 + RDM
+    # 4. 生成回波 + RDM (小场景 RMS=5ns，控制多径扩展)
     X, Y = sim.generate_echo(
         targets=targets, snr_db=20,
         use_swerling=args.swerling,
-        use_multipath=args.multipath
+        use_multipath=args.multipath,
+        tdl_model="TDL-A",
+        rms_delay_ns=5.0,
     )
     rdm_mag, range_axis, velocity_axis = sim.compute_rdm(X, Y)
     rdm_db = 20 * np.log10(rdm_mag / np.max(rdm_mag) + 1e-12)
 
-    # 5. CFAR 检测
-    detected = ca_cfar_2d(rdm_mag, guard_cells=2, train_cells=4, pfa=1e-2)
+    # 5. CFAR 检测 (功率域 + Pfa=1e-3 + 峰值过滤)
+    rdm_power = np.abs(rdm_mag) ** 2
+    detected_cfar = ca_cfar_2d(rdm_power, guard_cells=2,
+                               train_cells=4, pfa=1e-3)
+    # ★ 相对峰值过滤 (-10 dB) 切除 FFT 旁瓣
+    max_power = np.max(rdm_power)
+    detected = detected_cfar & (rdm_power > max_power * 0.1)
     raw_count = int(np.sum(detected))
 
-    range_res_m = sim.c / (2 * sim.bandwidth)       # ← 新增
-    r_gate_phys = 45.0                               # ← 新增
-    r_gate = max(3, int(round(r_gate_phys / range_res_m)))  # ← 新增
-    v_gate = 3                                       # ← 新增
+    # 6. NMS 聚类 (自适应距离门限)
+    range_res_m = sim.c / (2 * sim.bandwidth)
+    r_gate_phys = 20.0
+    r_gate = max(3, int(round(r_gate_phys / range_res_m)))
+    v_gate = 3
     det_ranges, det_velocities, det_mags = cluster_detections(
         rdm_mag, detected, range_axis, velocity_axis,
         r_gate=r_gate, v_gate=v_gate
     )
     print(f"  [NMS] r_gate={r_gate} 门 (物理 ~{r_gate * range_res_m:.1f}m), v_gate={v_gate}")
-
-    print(f"\n  CFAR 原始检测点: {raw_count}, NMS 聚类后: {len(det_ranges)}")
+    print(f"\n  CFAR+NMS 检测点: {raw_count} → {len(det_ranges)}")
+    for i, (r, v) in enumerate(zip(det_ranges, det_velocities)):
+        print(f"    [{i+1}] 距离={r:.1f}m, 速度={v:.1f}m/s")
 
     # 7. 鬼影抑制 (可选)
     true_idx, ghost_idx = [], []

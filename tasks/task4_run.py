@@ -1,4 +1,4 @@
-"""Task4 (MC 版): ISAC 感知性能扫描 - 每 mu 运行 N 次取平均。"""
+"""Task4: ISAC 感知性能扫描 - 每 mu 运行 N 次取平均。"""
 import sys
 import json
 import yaml
@@ -15,9 +15,10 @@ from src.simulation.cfar import ca_cfar_2d
 
 def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
                        r_gate=3, v_gate=3):
+    """NMS 聚类，返回 (ranges, velocities, mags)。"""
     rows, cols = np.where(detected)
     if len(rows) == 0:
-        return [], []
+        return [], [], []
     points = sorted(zip(rows, cols), key=lambda p: -rdm_mag[p[0], p[1]])
     clustered = []
     for (r, c) in points:
@@ -26,14 +27,15 @@ def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
             clustered.append((r, c))
     det_ranges = [range_axis[r] for r, _ in clustered]
     det_velocities = [velocity_axis[c] for _, c in clustered]
-    return det_ranges, det_velocities
+    det_mags = [rdm_mag[r, c] for r, c in clustered]
+    return det_ranges, det_velocities, det_mags
 
 
 def run_single_mu(mu, scs_khz, cp_duration_us, targets,
                   snr_db=20, use_swerling=True, use_multipath=True,
+                  tdl_model="TDL-A", rms_delay_ns=5.0,
                   n_trials=10, base_seed=42):
-    """对单个 mu 运行 N 次蒙特卡洛，取平均检测性能。"""
-    # ★ 符号数自适应：保证速度分辨率 >= 20 m/s
+    """对单个 mu 运行 N 次蒙特卡洛。"""
     if scs_khz <= 60:
         num_sym = 64
     elif scs_khz <= 240:
@@ -41,7 +43,7 @@ def run_single_mu(mu, scs_khz, cp_duration_us, targets,
     elif scs_khz <= 480:
         num_sym = 512
     else:
-        num_sym = 2048     # mu=6 使用 2048 符号
+        num_sym = 2048
 
     hits_list, ghosts_list = [], []
     range_res_final = None
@@ -55,21 +57,34 @@ def run_single_mu(mu, scs_khz, cp_duration_us, targets,
                              num_symbols=num_sym, fc_ghz=3.5)
         bandwidth_final = sim.bandwidth
         range_res_final = sim.c / (2 * sim.bandwidth)
-        # 速度分辨率 = c / (2*fc*CPI)
         cpi = num_sym * sim.symbol_duration
         velocity_res_final = sim.c / (2 * sim.fc_ghz * 1e9 * cpi)
 
-        X, Y = sim.generate_echo(targets=targets, snr_db=snr_db,
-                                  use_swerling=use_swerling,
-                                  use_multipath=use_multipath)
+        X, Y = sim.generate_echo(
+            targets=targets, snr_db=snr_db,
+            use_swerling=use_swerling,
+            use_multipath=use_multipath,
+            tdl_model=tdl_model,
+            rms_delay_ns=rms_delay_ns,
+        )
         rdm_mag, range_axis, velocity_axis = sim.compute_rdm(X, Y)
 
-        detected = ca_cfar_2d(rdm_mag, guard_cells=2, train_cells=4, pfa=1e-2)
-        det_ranges, det_velocities = cluster_detections(
-            rdm_mag, detected, range_axis, velocity_axis, r_gate=3, v_gate=3
+        # ★ CFAR: 功率域 + Pfa=1e-3 + 峰值过滤
+        rdm_power = np.abs(rdm_mag) ** 2
+        detected_cfar = ca_cfar_2d(rdm_power, guard_cells=2,
+                                   train_cells=4, pfa=1e-3)
+        max_power = np.max(rdm_power)
+        detected = detected_cfar & (rdm_power > max_power * 0.1)
+
+        # NMS 自适应距离门限
+        r_gate_phys = 20.0
+        r_gate = max(3, int(round(r_gate_phys / range_res_final)))
+        v_gate = 3
+        det_ranges, det_velocities, det_mags = cluster_detections(
+            rdm_mag, detected, range_axis, velocity_axis,
+            r_gate=r_gate, v_gate=v_gate
         )
 
-        # ★ 自适应匹配容差
         R_TOL = max(5.0, 2 * range_res_final)
         V_TOL = max(20.0, 2 * velocity_res_final)
         true_hits = 0
@@ -115,9 +130,11 @@ def main():
     ]
 
     N_TRIALS = 10
-    print(f"[Task4] ISAC 感知性能扫描 (Swerling-I + TDL Multipath)")
-    print(f"  蒙特卡洛: 每个 mu 运行 {N_TRIALS} 次取平均")
-    print(f"  匹配容差: 自适应 (range_res 和 velocity_res 相关)")
+    RMS_DELAY_NS = 5.0
+
+    print(f"[Task4] ISAC 感知性能扫描 (TDL-A {RMS_DELAY_NS}ns RMS, Swerling-I)")
+    print(f"  蒙特卡洛: {N_TRIALS} 次")
+    print(f"  CFAR: Pfa=1e-3, 功率域 + 峰值过滤 (-10dB)")
     print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}\n")
 
     results = []
@@ -125,13 +142,12 @@ def main():
         mu = num["mu"]
         scs_khz = num["scs_khz"]
         cp_dur = num["cp_duration_us"]
-        print(f"  [mu={mu}] SCS={scs_khz}kHz, {N_TRIALS} 次 MC 仿真中...")
-        res = run_single_mu(mu, scs_khz, cp_dur, targets, n_trials=N_TRIALS)
+        print(f"  [mu={mu}] SCS={scs_khz}kHz, {N_TRIALS} 次 MC...")
+        res = run_single_mu(mu, scs_khz, cp_dur, targets,
+                            n_trials=N_TRIALS, rms_delay_ns=RMS_DELAY_NS)
         results.append(res)
-        print(f"    平均命中: {res['avg_hits']:.2f}/3 (±{res['std_hits']:.2f}), "
-              f"平均鬼影: {res['avg_ghosts']:.2f}, "
-              f"距离分辨率: {res['range_res_m']}m, "
-              f"速度分辨率: {res['velocity_res_ms']}m/s")
+        print(f"    命中: {res['avg_hits']:.2f}/3 (±{res['std_hits']:.2f}), "
+              f"鬼影: {res['avg_ghosts']:.2f}, Res={res['range_res_m']}m")
 
     out_dir = ROOT / "outputs" / "task4"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -140,16 +156,16 @@ def main():
                           encoding="utf-8")
 
     mus = [r["mu"] for r in results]
+    det_pct = [r["avg_hits"] / 3 * 100 for r in results]
+    det_err = [r["std_hits"] / 3 * 100 for r in results]
     ghosts = [r["avg_ghosts"] for r in results]
     range_res = [r["range_res_m"] for r in results]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-    det_pct = [r["avg_hits"] / 3 * 100 for r in results]
-    det_err = [r["std_hits"] / 3 * 100 for r in results]
     axes[0].bar(mus, det_pct, yerr=det_err, color='steelblue', capsize=5)
     axes[0].set_xlabel("mu"); axes[0].set_ylabel("Detection Rate (%)")
-    axes[0].set_title(f"Target Detection Rate ({N_TRIALS} MC trials)")
+    axes[0].set_title(f"Detection Rate ({N_TRIALS} MC trials)")
     axes[0].set_xticks(mus); axes[0].set_ylim(0, 110)
     for i, v in enumerate(det_pct):
         axes[0].text(mus[i], v + 4, f"{v:.0f}%", ha='center')
@@ -166,24 +182,22 @@ def main():
     axes[2].set_title("Range Resolution")
     axes[2].set_xticks(mus)
     axes[2].set_yscale('log')
-    for i, v in enumerate(range_res):
-        axes[2].text(mus[i], v * 1.15, f"{v:.2f}", ha='center', fontsize=8)
 
     plt.tight_layout()
     plot_path = out_dir / "isac_sweep_summary.png"
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    print("\n" + "=" * 95)
+    print("\n" + "=" * 90)
     print(f"{'mu':<4}{'SCS':<8}{'BW(MHz)':<10}{'Res(m)':<10}"
           f"{'Vres(m/s)':<12}{'命中':<12}{'鬼影':<10}{'检测率':<8}")
-    print("-" * 95)
+    print("-" * 90)
     for r in results:
         hit_str = f"{r['avg_hits']:.2f}±{r['std_hits']:.2f}"
         print(f"{r['mu']:<4}{r['scs_khz']:<8}{r['bandwidth_mhz']:<10}"
               f"{r['range_res_m']:<10}{r['velocity_res_ms']:<12}"
               f"{hit_str:<12}{r['avg_ghosts']:<10}{r['detection_rate']*100:.0f}%")
-    print("=" * 95)
+    print("=" * 90)
 
     print(f"\n[output] JSON: {json_path}")
     print(f"[output] 汇总图: {plot_path}")

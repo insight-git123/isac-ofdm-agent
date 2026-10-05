@@ -9,7 +9,8 @@ from src.simulation.tdl_model import tdl_frequency_response
 
 class RadarSimulator:
     def __init__(self, scs_khz: float, fft_size: int = 1024,
-                 num_symbols: int = 64, fc_ghz: float = 3.5):
+                 num_symbols: int = 64, fc_ghz: float = 3.5,
+                  modulation: str = "qpsk"):
         self.fft_size = fft_size
         self.num_symbols = num_symbols
         self.fc_ghz = fc_ghz
@@ -17,6 +18,7 @@ class RadarSimulator:
         self.scs = scs_khz * 1e3           # Hz
         self.bandwidth = fft_size * self.scs
         self.symbol_duration = 1 / self.scs
+        self.modulation = modulation
 
     def generate_echo(self, targets: list, snr_db: float = 20,
                       use_swerling: bool = False,
@@ -29,8 +31,11 @@ class RadarSimulator:
             use_multipath: 为 True 时，用标准 TDL 模型给每个目标加多径
             tdl_model: TDL-A / TDL-B / TDL-C / TDL-D / TDL-E
         """
-        X = (np.random.randn(self.fft_size, self.num_symbols) +
-             1j * np.random.randn(self.fft_size, self.num_symbols)) / np.sqrt(2)
+              # 使用指定调制方案生成频域数据
+        from src.simulation.modulation import modulate
+        X = np.zeros((self.fft_size, self.num_symbols), dtype=complex)
+        for l in range(self.num_symbols):
+            X[:, l] = modulate(self.fft_size, getattr(self, 'modulation', 'qpsk'))
 
         k = np.arange(self.fft_size).reshape(-1, 1)     # 子载波索引
         l = np.arange(self.num_symbols).reshape(1, -1)  # 符号索引

@@ -1,4 +1,4 @@
-"""Task2: 读取 Task1 参数，生成 OFDM 波形并绘图（支持 --mu 动态参数）"""
+"""Task2: 读取 Task1 参数，生成 OFDM 波形并绘图（支持 --mu / --modulation）"""
 import sys
 import argparse
 from pathlib import Path
@@ -16,6 +16,9 @@ def main():
     # 1. 命令行参数
     parser = argparse.ArgumentParser(description="Task2: OFDM waveform generation")
     parser.add_argument("--mu", type=int, default=0, help="Numerology mu (0-6), default=0")
+    parser.add_argument("--modulation", type=str, default="qpsk",
+                        choices=["qpsk", "16qam", "64qam", "256qam"],
+                        help="OFDM 频域调制方案")
     args = parser.parse_args()
 
     # 2. 读取 Task1 参数
@@ -33,27 +36,30 @@ def main():
     # 3. 动态选择 mu
     target = next((n for n in numerology if n["mu"] == args.mu), None)
     if not target:
-        print(f"错误: 未找到 mu={args.mu} 的参数，可用 mu 值: {[n['mu'] for n in numerology]}")
+        print(f"错误: 未找到 mu={args.mu} 的参数，可用: {[n['mu'] for n in numerology]}")
         return 1
 
-    print(f"  使用参数: mu={args.mu}, SCS={target['scs_khz']}kHz, CP长度={target['cp_duration_us']}us")
+    print(f"  使用参数: mu={args.mu}, SCS={target['scs_khz']}kHz, "
+          f"CP={target['cp_duration_us']}us, 调制={args.modulation.upper()}")
 
     # 4. 生成波形
     generator = OFDMGenerator(
         scs_khz=target["scs_khz"],
-        cp_duration_us=target["cp_duration_us"]
+        cp_duration_us=target["cp_duration_us"],
+        modulation=args.modulation,
     )
     waveform = generator.generate(num_symbols=2)
 
-    # 5. 绘图（文件名带 mu，多次运行不会互相覆盖）
+    # 5. 绘图（文件名带 mu + modulation）
     out_dir = ROOT / "outputs" / "task2"
     out_dir.mkdir(parents=True, exist_ok=True)
-    plot_path = out_dir / f"ofdm_waveform_mu{args.mu}.png"
+    plot_path = out_dir / f"ofdm_waveform_mu{args.mu}_{args.modulation}.png"
 
     plt.figure(figsize=(12, 4))
     plt.plot(np.real(waveform), label="Real Part", alpha=0.8)
     plt.plot(np.imag(waveform), label="Imag Part", alpha=0.6)
-    plt.title(f"OFDM Waveform (mu={args.mu}, SCS={target['scs_khz']}kHz, CP={target['cp_duration_us']}us)")
+    plt.title(f"OFDM Waveform (mu={args.mu}, SCS={target['scs_khz']}kHz, "
+              f"CP={target['cp_duration_us']}us, {args.modulation.upper()})")
     plt.xlabel("Sample Index")
     plt.ylabel("Amplitude")
     plt.legend()
