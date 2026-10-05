@@ -28,19 +28,16 @@
   - 多径时延分辨率受 FFT 采样限制
 ## 3. OFDM 信号模型
 
-- **已实现 NR 资源网格**（P2.4）：
-  - DC 子载波置零
-  - 保护带（可配置 RB 数）
-  - PDSCH DMRS（Config Type 1，symbol 2）
-  - PRS（comb=4，symbol 5-8）
-  - 资源网格可视化
-- **已实现调制**：QPSK / 16QAM / 64QAM / 256QAM
+- **已实现**（P2.4 + P3.4）：
+  - NR 资源网格：DC 置零、保护带、DMRS、PRS
+  - QPSK/16QAM/64QAM/256QAM 调制
+  - **完整 CP-OFDM 收发链**：IFFT → 插 CP → 时域 FIR 信道 → 去 CP → FFT
+  - 时域/频域等效性定量验证（CP ≥ 信道时延 → ISI < 1e-30）
+  - 过采样链路（可选占用部分子载波）
 - **仍存在的简化**：
-  - 未实现完整 NR 帧结构（SSB、PDCCH、CORESET）
+  - 未实现 SSB 与 PDSCH 的时频复用（P3.3 实现了独立 SSB）
   - 未实现预编码、层映射、码字扰码
-  - 未实现真实信道编码（LDPC/Polar）
-  - DMRS 仅实现 Type 1，未实现 Type 2 和 additional positions
-  - PRS 仅实现固定 comb=4，未实现 comb 组合表
+  - **已实现**：(2,1,3) 卷积码 + Viterbi（P3.2）；**未实现**：NR 标准 LDPC/Polar
 ## 4. CFAR 检测
 
 - **已重写为功率域**：明确接收 `|rdm|^2`，使用标准 CA-CFAR 阈值公式 `alpha = N_train * (pfa^(-1/N_train) - 1)`
