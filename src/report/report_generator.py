@@ -141,13 +141,13 @@ def generate_report(root_dir: Path) -> str:
         n_trials = sweep_data[0].get("n_trials", 10)
         md.append(f"每个 mu 运行 {n_trials} 次蒙特卡洛仿真取平均，"
                   f"CFAR Pfa=1e-3 (功率域 + 峰值过滤)。\n")
-        md.append("| mu | SCS (kHz) | BW (MHz) | 距离分辨率 (m) | 速度分辨率 (m/s) | 平均命中 | 平均鬼影 | 检测率 |")
-        md.append("|---|---|---|---|---|---|---|---|")
+        md.append("| mu | SCS (kHz) | BW (MHz) | 距离分辨率 (m) | 平均命中 (95% CI) | 平均鬼影 (95% CI) | 检测率 |")
+        md.append("|---|---|---|---|---|---|---|")
         for r in sweep_data:
             md.append(f"| {r['mu']} | {r['scs_khz']} | {r['bandwidth_mhz']} | "
-                      f"{r['range_res_m']} | {r.get('velocity_res_ms', '-')} | "
-                      f"{r['avg_hits']:.2f}±{r['std_hits']:.2f}/3 | "
-                      f"{r['avg_ghosts']:.2f} | "
+                      f"{r['range_res_m']} | "
+                      f"{r['avg_hits']:.2f} ± {r['ci95_hits']:.2f}/3 | "
+                      f"{r['avg_ghosts']:.2f} ± {r['ci95_ghosts']:.2f} | "
                       f"{r['detection_rate']*100:.0f}% |")
         md.append("")
 
