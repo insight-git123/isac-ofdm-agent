@@ -30,3 +30,20 @@ OFDM 波形生成 → 严格时域脉冲压缩 → 3GPP TDL-A 标准多径信道
 - ✅ **P0**（可复现性）：输入路径动态解析 + 诚实定位 + `LIMITATIONS.md`
 - ✅ **P1**（可信度）：统一 3GPP TDL-A 信道（23 抽头）+ 功率域 CA-CFAR（Pfa 校准）
 - ⏳ **P2**（未来）：NR 资源网格、QPSK/16QAM 调制、统计置信区间
+## 主要结果
+
+### 时域脉冲压缩 (mu=3, BW=122.88 MHz)
+
+![Pulse Compression](outputs/task3/pulse_compression_mu3.png)
+
+### TDL-A 多径信道对比 (mu=3, 23 抽头)
+
+![TDL Channel](outputs/task3/tdl_TDL-A_mu3.png)
+
+### 多径鬼影抑制 (mu=3, Swerling + TDL-A)
+
+![Ghost Suppression](outputs/task3/rdm_mu3_swerling_multipath_ghostsuppress_cfar.png)
+
+### 分辨率公式验证
+
+![Deep Analysis](outputs/task4/deep_analysis.png)
