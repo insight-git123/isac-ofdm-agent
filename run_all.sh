@@ -11,7 +11,7 @@ elif [ -d ".venv/bin" ]; then
     source .venv/bin/activate
 fi
 
-echo -e "\n[1/12] Task1: 3GPP 参数提取 (使用样例文本)..."
+echo -e "\n[1/12] Task1: 3GPP 参数提取..."
 python tasks/task1_run.py --raw data/raw/sample_ts38211.txt
 
 echo -e "\n[2/12] Task2: OFDM 波形生成..."
@@ -44,7 +44,7 @@ python tasks/task3_cp_ofdm.py --mu 3
 echo -e "\n[11/12] Task4: 蒙特卡洛性能扫描 (20 次加速)..."
 python tasks/task4_run.py --mc-trials 20
 
-echo -e "\n[12/12] Task4-Analysis + Task5: 深度分析 + 报告..."
+echo -e "\n[12/12] Task4-Analysis + Task5..."
 python tasks/task4_analysis.py
 python tasks/task5_run.py
 
