@@ -70,6 +70,17 @@ def generate_report(root_dir: Path) -> str:
     else:
         md.append("*(未找到波形图)*\n")
 
+            # NR 资源网格 (P2.4)
+    nr_grid_imgs = sorted(task2_dir.glob("nr_grid_mu*_dmrs_prs.png"))
+    if nr_grid_imgs:
+        md.append("### NR 资源网格 (P2.4)\n")
+        md.append("实现 3GPP TS 38.211 定义的 NR 资源网格：DC 子载波置零、"
+                  "保护带、PDSCH DMRS (Config Type 1)、PRS (comb=4)。\n")
+        rel = f"../task2/{nr_grid_imgs[-1].name}"
+        md.append(f"![NR Grid]({rel})\n")
+        md.append("*图 1b: NR 资源网格 "
+                  "(蓝=data, 绿=DMRS, 红=PRS, 灰=guard, 黑=DC)*\n")
+
     # ========== 4. ISAC 感知性能 (Task3) ==========
     md.append("## 4. ISAC 感知性能分析 (Task3)\n")
 

@@ -1,6 +1,6 @@
 # ISAC-OFDM Agent 实验报告
 
-**生成时间**: 2026-10-05 16:57:33
+**生成时间**: 2026-10-05 17:15:44
 
 ## 1. 项目信息
 
@@ -26,6 +26,14 @@
 ![OFDM Waveform](../task2/ofdm_waveform_mu3_qpsk.png)
 
 *图 1: OFDM 时域波形 (ofdm_waveform_mu3_qpsk.png)*
+
+### NR 资源网格 (P2.4)
+
+实现 3GPP TS 38.211 定义的 NR 资源网格：DC 子载波置零、保护带、PDSCH DMRS (Config Type 1)、PRS (comb=4)。
+
+![NR Grid](../task2/nr_grid_mu3_dmrs_prs.png)
+
+*图 1b: NR 资源网格 (蓝=data, 绿=DMRS, 红=PRS, 灰=guard, 黑=DC)*
 
 ## 4. ISAC 感知性能分析 (Task3)
 

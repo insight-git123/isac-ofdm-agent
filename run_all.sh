@@ -17,6 +17,9 @@ python tasks/task1_run.py --raw data/raw/sample_ts38211.txt
 echo -e "\n[2/8] Task2: OFDM 波形生成..."
 python tasks/task2_run.py --mu 3
 
+echo -e "\n[2.5/8] Task2-NRGrid: NR 资源网格..."
+python tasks/task2_nr_grid.py --mu 3
+
 echo -e "\n[3/8] Task3: 严格时域脉冲压缩..."
 python tasks/task3_time_domain.py --mu 3
 
