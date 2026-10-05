@@ -1,5 +1,6 @@
 """Task3: 频域多目标 ISAC 感知 + CFAR + NMS + Swerling-I + TDL 多径 + 鬼影抑制"""
 import sys
+import json
 import yaml
 import argparse
 import matplotlib.pyplot as plt
@@ -84,7 +85,7 @@ def main():
     ]
     print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}")
 
-    # 4. 生成回波 + RDM (小场景 RMS=5ns，控制多径扩展)
+    # 4. 生成回波 + RDM
     X, Y = sim.generate_echo(
         targets=targets, snr_db=20,
         use_swerling=args.swerling,
@@ -99,12 +100,11 @@ def main():
     rdm_power = np.abs(rdm_mag) ** 2
     detected_cfar = ca_cfar_2d(rdm_power, guard_cells=2,
                                train_cells=4, pfa=1e-3)
-    # ★ 相对峰值过滤 (-10 dB) 切除 FFT 旁瓣
     max_power = np.max(rdm_power)
     detected = detected_cfar & (rdm_power > max_power * 0.1)
     raw_count = int(np.sum(detected))
 
-    # 6. NMS 聚类 (自适应距离门限)
+    # 6. NMS 聚类
     range_res_m = sim.c / (2 * sim.bandwidth)
     r_gate_phys = 20.0
     r_gate = max(3, int(round(r_gate_phys / range_res_m)))
@@ -177,6 +177,61 @@ def main():
     plt.close()
 
     print(f"\n[output] {plot_path}")
+
+    # ================= 9. 保存 result.json (P2.2) =================
+    R_TOL = max(5.0, 2 * range_res_m)
+
+    def match_type(det_r, det_v):
+        for t in targets:
+            if abs(det_r - t["range"]) <= R_TOL and abs(det_v - t["velocity"]) <= 15.0:
+                return "true", t
+        return "ghost", None
+
+    detections_json = []
+    max_mag = max(det_mags) if det_mags else 1.0
+    for i, (dr, dv, dm) in enumerate(zip(det_ranges, det_velocities, det_mags)):
+        dtype, matched = match_type(dr, dv)
+        entry = {
+            "id": i + 1,
+            "det_range": round(float(dr), 2),
+            "det_vel": round(float(dv), 2),
+            "mag_db": round(float(20 * np.log10(dm / max_mag + 1e-12)), 2),
+            "type": dtype,
+        }
+        if matched:
+            entry["true_range"] = matched["range"]
+            entry["true_vel"] = matched["velocity"]
+        detections_json.append(entry)
+
+    result_json = {
+        "meta": {
+            "mu": args.mu,
+            "scs_khz": scs_khz,
+            "bandwidth_mhz": round(sim.bandwidth / 1e6, 2),
+            "range_res_m": round(range_res_m, 2),
+            "nms_r_gate": r_gate,
+            "seed": args.seed,
+            "swerling": args.swerling,
+            "multipath": args.multipath,
+            "suppress": args.suppress,
+        },
+        "targets": [
+            {"range": t["range"], "velocity": t["velocity"], "rcs": t["rcs"]}
+            for t in targets
+        ],
+        "detections": detections_json,
+        "summary": {
+            "raw_cfar_count": int(raw_count),
+            "nms_count": len(det_ranges),
+            "true_count": sum(1 for d in detections_json if d["type"] == "true"),
+            "ghost_count": sum(1 for d in detections_json if d["type"] == "ghost"),
+        },
+    }
+    json_path = out_dir / f"result_mu{args.mu}.json"
+    json_path.write_text(json.dumps(result_json, indent=2, ensure_ascii=False),
+                          encoding="utf-8")
+    print(f"[output] 结果 JSON: {json_path}")
+
     return 0
 
 
