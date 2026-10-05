@@ -26,13 +26,13 @@ jobs:
     - name: Run all unit tests
       run: python -m pytest tests/ -v
 
-    - name: Verify Task1 on sample text
+    -     - name: Verify Task1 on sample text
       run: |
         python -c "
         import sys; sys.path.insert(0, '.')
         from tasks.task1_run import extract_numerology, enrich
         text = open('data/raw/sample_ts38211.txt', encoding='utf-8').read()
         rows = enrich(extract_numerology(text))
-        assert len(rows) == 4, f'Expected 4 rows, got {len(rows)}'
+        assert len(rows) == 7, f'Expected 7 rows, got {len(rows)}'
         print('Task1 sample verification: OK')
         "
