@@ -1,9 +1,9 @@
-"""Task4: ISAC 感知性能扫描 - 蒙特卡洛 + 95% 置信区间。
+"""Task4 (P4.2 版): ISAC 感知性能扫描 - Bootstrap/Wilson 置信区间。
 
-P2.3 更新:
-- MC 次数从 10 提升到 50 (可通过 --mc-trials 配置)
-- 计算 95% 置信区间 (正态近似)
-- 输出 JSON 增加 ci95_hits 字段
+相比 P2.3:
+- 用 Bootstrap 重采样替代正态近似的 95% CI
+- 用 Wilson 区间报告检测率（比例型统计量）
+- MC 次数可配置 (默认 100, 支持 --mc-trials)
 """
 import sys
 import json
@@ -18,11 +18,11 @@ sys.path.insert(0, str(ROOT))
 
 from src.simulation.radar_processing import RadarSimulator
 from src.simulation.cfar import ca_cfar_2d
+from src.simulation.statistics import bootstrap_ci, wilson_ci_no_scipy
 
 
 def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
                        r_gate=3, v_gate=3):
-    """NMS 聚类，返回 (ranges, velocities, mags)。"""
     rows, cols = np.where(detected)
     if len(rows) == 0:
         return [], [], []
@@ -38,19 +38,11 @@ def cluster_detections(rdm_mag, detected, range_axis, velocity_axis,
     return det_ranges, det_velocities, det_mags
 
 
-def ci95_from_list(values):
-    """95% 置信区间半宽 (正态近似): 1.96 * std / sqrt(n)。"""
-    n = len(values)
-    if n < 2:
-        return 0.0
-    return 1.96 * np.std(values, ddof=1) / np.sqrt(n)
-
-
 def run_single_mu(mu, scs_khz, cp_duration_us, targets,
                   snr_db=20, use_swerling=True, use_multipath=True,
                   tdl_model="TDL-A", rms_delay_ns=5.0,
-                  n_trials=50, base_seed=42):
-    """对单个 mu 运行 N 次蒙特卡洛，返回统计量。"""
+                  n_trials=100, base_seed=42):
+    """对单个 mu 运行 N 次蒙特卡洛，返回统计量 (含 Bootstrap/Wilson CI)。"""
     if scs_khz <= 60:
         num_sym = 64
     elif scs_khz <= 240:
@@ -84,18 +76,16 @@ def run_single_mu(mu, scs_khz, cp_duration_us, targets,
         )
         rdm_mag, range_axis, velocity_axis = sim.compute_rdm(X, Y)
 
-        # CFAR: 功率域 + Pfa=1e-3 + 峰值过滤
         rdm_power = np.abs(rdm_mag) ** 2
         detected_cfar = ca_cfar_2d(rdm_power, guard_cells=2,
                                    train_cells=4, pfa=1e-3)
         max_power = np.max(rdm_power)
         detected = detected_cfar & (rdm_power > max_power * 0.1)
 
-        # NMS 自适应距离门限
         r_gate_phys = 20.0
         r_gate = max(3, int(round(r_gate_phys / range_res_final)))
         v_gate = 3
-        det_ranges, det_velocities, det_mags = cluster_detections(
+        det_ranges, det_velocities, _ = cluster_detections(
             rdm_mag, detected, range_axis, velocity_axis,
             r_gate=r_gate, v_gate=v_gate
         )
@@ -105,18 +95,23 @@ def run_single_mu(mu, scs_khz, cp_duration_us, targets,
         true_hits = 0
         for tgt in targets:
             for (r, v) in zip(det_ranges, det_velocities):
-                if abs(r - tgt["range"]) <= R_TOL and abs(v - tgt["velocity"]) <= V_TOL:
+                if abs(r - tgt["range"]) <= R_TOL and \
+                   abs(v - tgt["velocity"]) <= V_TOL:
                     true_hits += 1
                     break
 
         hits_list.append(true_hits)
         ghosts_list.append(len(det_ranges) - true_hits)
 
-    avg_hits = float(np.mean(hits_list))
-    avg_ghosts = float(np.mean(ghosts_list))
-    std_hits = float(np.std(hits_list, ddof=1)) if len(hits_list) > 1 else 0.0
-    ci95_hits = ci95_from_list(hits_list)
-    ci95_ghosts = ci95_from_list(ghosts_list)
+    # ★ Bootstrap CI (连续统计量)
+    hits_stat = bootstrap_ci(hits_list, n_bootstrap=2000, confidence=0.95)
+    ghosts_stat = bootstrap_ci(ghosts_list, n_bootstrap=2000, confidence=0.95)
+
+    # ★ Wilson CI (比例型统计量: 检测率)
+    total_targets = n_trials * len(targets)
+    total_hits = int(np.sum(hits_list))
+    detection_stat = wilson_ci_no_scipy(total_hits, total_targets,
+                                         confidence=0.95)
 
     return {
         "mu": mu,
@@ -127,20 +122,26 @@ def run_single_mu(mu, scs_khz, cp_duration_us, targets,
         "range_res_m": round(range_res_final, 2),
         "velocity_res_ms": round(velocity_res_final, 2),
         "n_trials": n_trials,
-        "avg_hits": round(avg_hits, 2),
-        "std_hits": round(std_hits, 2),
-        "ci95_hits": round(ci95_hits, 3),
-        "avg_ghosts": round(avg_ghosts, 2),
-        "ci95_ghosts": round(ci95_ghosts, 3),
-        "detection_rate": round(avg_hits / len(targets), 3),
+        "avg_hits": round(hits_stat["mean"], 3),
+        "ci95_hits_lo": round(hits_stat["ci_lo"], 3),
+        "ci95_hits_hi": round(hits_stat["ci_hi"], 3),
+        "ci95_hits_half": round(hits_stat["ci_half_width"], 3),
+        "avg_ghosts": round(ghosts_stat["mean"], 3),
+        "ci95_ghosts_lo": round(ghosts_stat["ci_lo"], 3),
+        "ci95_ghosts_hi": round(ghosts_stat["ci_hi"], 3),
+        "ci95_ghosts_half": round(ghosts_stat["ci_half_width"], 3),
+        "detection_rate": round(detection_stat["p_hat"], 4),
+        "detection_ci_lo": round(detection_stat["ci_lo"], 4),
+        "detection_ci_hi": round(detection_stat["ci_hi"], 4),
         "hits_list": hits_list,
     }
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mc-trials", type=int, default=50,
-                        help="蒙特卡洛次数 (默认 50)")
+    parser.add_argument("--mc-trials", type=int, default=100,
+                        help="蒙特卡洛次数 (默认 100; 评审建议 >= 500 但耗时长)")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     params_path = ROOT / "outputs" / "task1" / "params.yaml"
@@ -156,10 +157,11 @@ def main():
     N_TRIALS = args.mc_trials
     RMS_DELAY_NS = 5.0
 
-    print(f"[Task4] ISAC 感知性能扫描 (TDL-A {RMS_DELAY_NS}ns RMS, Swerling-I)")
+    print(f"[Task4] ISAC 感知性能扫描 (P4.2 Bootstrap/Wilson CI)")
     print(f"  蒙特卡洛: {N_TRIALS} 次/μ")
-    print(f"  CFAR: Pfa=1e-3, 功率域 + 峰值过滤 (-10dB)")
-    print(f"  统计: 95% 置信区间 (正态近似)")
+    print(f"  CFAR: Pfa=1e-3 (功率域 + 峰值过滤)")
+    print(f"  统计: Bootstrap (n=2000) + Wilson 区间")
+    print(f"  随机种子: {args.seed}")
     print(f"  目标: {[(t['range'], t['velocity']) for t in targets]}\n")
 
     results = []
@@ -169,10 +171,13 @@ def main():
         cp_dur = num["cp_duration_us"]
         print(f"  [mu={mu}] SCS={scs_khz}kHz, {N_TRIALS} 次 MC...")
         res = run_single_mu(mu, scs_khz, cp_dur, targets,
-                            n_trials=N_TRIALS, rms_delay_ns=RMS_DELAY_NS)
+                            n_trials=N_TRIALS, rms_delay_ns=RMS_DELAY_N_NS
+                            if False else RMS_DELAY_NS,
+                            base_seed=args.seed)
         results.append(res)
-        print(f"    命中: {res['avg_hits']:.2f} ± {res['ci95_hits']:.2f} (95% CI), "
-              f"鬼影: {res['avg_ghosts']:.2f} ± {res['ci95_ghosts']:.2f}")
+        print(f"    命中: {res['avg_hits']:.2f} [{res['ci95_hits_lo']:.2f}, "
+              f"{res['ci95_hits_hi']:.2f}], 检测率: {res['detection_rate']*100:.1f}% "
+              f"[{res['detection_ci_lo']*100:.1f}, {res['detection_ci_hi']*100:.1f}]")
 
     out_dir = ROOT / "outputs" / "task4"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -180,56 +185,73 @@ def main():
     json_path.write_text(json.dumps(results, indent=2, ensure_ascii=False),
                           encoding="utf-8")
 
-    # ========== 可视化 ==========
+    # 可视化
     mus = [r["mu"] for r in results]
-    det_pct = [r["avg_hits"] / 3 * 100 for r in results]
-    det_ci_pct = [r["ci95_hits"] / 3 * 100 for r in results]
+    det_pct = [r["detection_rate"] * 100 for r in results]
+    det_lo = [r["detection_ci_lo"] * 100 for r in results]
+    det_hi = [r["detection_ci_hi"] * 100 for r in results]
+    det_err_lo = [d - l for d, l in zip(det_pct, det_lo)]
+    det_err_hi = [h - d for d, h in zip(det_pct, det_hi)]
+
     ghosts = [r["avg_ghosts"] for r in results]
-    ghost_ci = [r["ci95_ghosts"] for r in results]
+    ghost_lo = [r["ci95_ghosts_lo"] for r in results]
+    ghost_hi = [r["ci95_ghosts_hi"] for r in results]
+    ghost_err_lo = [g - l for g, l in zip(ghosts, ghost_lo)]
+    ghost_err_hi = [h - g for g, h in zip(ghosts, ghost_hi)]
+
     range_res = [r["range_res_m"] for r in results]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-    # 图 1: 检测率 + 95% CI 误差棒
-    axes[0].bar(mus, det_pct, yerr=det_ci_pct, color='steelblue',
-                capsize=5, error_kw={'elinewidth': 2, 'ecolor': 'darkred'})
-    axes[0].set_xlabel("mu"); axes[0].set_ylabel("Detection Rate (%)")
-    axes[0].set_title(f"Detection Rate ({N_TRIALS} MC, 95% CI)")
-    axes[0].set_xticks(mus); axes[0].set_ylim(0, 110)
-    for i, (v, e) in enumerate(zip(det_pct, det_ci_pct)):
-        axes[0].text(mus[i], v + e + 3, f"{v:.0f}%", ha='center')
+    # 图 1: 检测率 + Wilson CI
+    axes[0].bar(mus, det_pct,
+                yerr=[det_err_lo, det_err_hi],
+                color='steelblue', capsize=5,
+                error_kw={'elinewidth': 2, 'ecolor': 'darkred'})
+    axes[0].set_xlabel("mu")
+    axes[0].set_ylabel("Detection Rate (%)")
+    axes[0].set_title(f"Detection Rate ({N_TRIALS} MC, Wilson 95% CI)")
+    axes[0].set_xticks(mus)
+    axes[0].set_ylim(0, 110)
+    for i, v in enumerate(det_pct):
+        axes[0].text(mus[i], v + 5, f"{v:.0f}%", ha='center', fontsize=9)
 
-    # 图 2: 鬼影数 + CI
-    axes[1].bar(mus, ghosts, yerr=ghost_ci, color='coral',
-                capsize=5, error_kw={'elinewidth': 2, 'ecolor': 'darkred'})
-    axes[1].set_xlabel("mu"); axes[1].set_ylabel("Avg Ghost Count")
-    axes[1].set_title(f"Multipath Ghosts ({N_TRIALS} MC, 95% CI)")
+    # 图 2: 鬼影数 + Bootstrap CI
+    axes[1].bar(mus, ghosts,
+                yerr=[ghost_err_lo, ghost_err_hi],
+                color='coral', capsize=5,
+                error_kw={'elinewidth': 2, 'ecolor': 'darkred'})
+    axes[1].set_xlabel("mu")
+    axes[1].set_ylabel("Avg Ghost Count")
+    axes[1].set_title(f"Multipath Ghosts ({N_TRIALS} MC, Bootstrap 95% CI)")
     axes[1].set_xticks(mus)
-    for i, (v, e) in enumerate(zip(ghosts, ghost_ci)):
-        axes[1].text(mus[i], v + e + 0.2, f"{v:.1f}", ha='center')
+    for i, v in enumerate(ghosts):
+        axes[1].text(mus[i], v + 0.3, f"{v:.1f}", ha='center', fontsize=9)
 
     # 图 3: 距离分辨率
     axes[2].bar(mus, range_res, color='seagreen')
-    axes[2].set_xlabel("mu"); axes[2].set_ylabel("Range Resolution (m)")
+    axes[2].set_xlabel("mu")
+    axes[2].set_ylabel("Range Resolution (m)")
     axes[2].set_title("Range Resolution")
-    axes[2].set_xticks(mus); axes[2].set_yscale('log')
+    axes[2].set_xticks(mus)
+    axes[2].set_yscale('log')
 
     plt.tight_layout()
     plot_path = out_dir / "isac_sweep_summary.png"
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
-    # ========== 终端汇总表 ==========
+    # 终端表格
     print("\n" + "=" * 100)
     print(f"{'mu':<4}{'SCS':<8}{'BW(MHz)':<10}{'Res(m)':<10}"
-          f"{'命中 (95% CI)':<22}{'鬼影 (95% CI)':<20}{'检测率':<8}")
+          f"{'命中 [95% CI]':<24}{'检测率 [Wilson CI]':<28}")
     print("-" * 100)
     for r in results:
-        hit_str = f"{r['avg_hits']:.2f}±{r['ci95_hits']:.2f}"
-        ghost_str = f"{r['avg_ghosts']:.2f}±{r['ci95_ghosts']:.2f}"
+        hit_str = f"{r['avg_hits']:.2f} [{r['ci95_hits_lo']:.2f},{r['ci95_hits_hi']:.2f}]"
+        det_str = (f"{r['detection_rate']*100:.1f}% "
+                   f"[{r['detection_ci_lo']*100:.1f},{r['detection_ci_hi']*100:.1f}]")
         print(f"{r['mu']:<4}{r['scs_khz']:<8}{r['bandwidth_mhz']:<10}"
-              f"{r['range_res_m']:<10}{hit_str:<22}{ghost_str:<20}"
-              f"{r['detection_rate']*100:.0f}%")
+              f"{r['range_res_m']:<10}{hit_str:<24}{det_str:<28}")
     print("=" * 100)
 
     print(f"\n[output] JSON: {json_path}")
