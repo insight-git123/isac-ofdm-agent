@@ -51,8 +51,12 @@ def test_qam16_constellation():
 
 
 def test_modulate_dispatcher():
-    """统一入口应能正确分派。"""
+    """统一入口应能正确分派。
+
+    注意: 256QAM 星座点功率范围大 (0.01~2.65), 1000 样本的均值
+    统计波动可能达 ±0.05。用 10000 样本 (波动 ÷ √10) + 容差 0.05。
+    """
     for scheme in ["qpsk", "16qam", "64qam", "256qam"]:
-        sym = modulate(1000, scheme)
-        assert len(sym) == 1000
+        sym = modulate(10000, scheme)   # ★ 从 1000 改到 10000
+        assert len(sym) == 10000
         assert abs(np.mean(np.abs(sym) ** 2) - 1.0) < 0.05
