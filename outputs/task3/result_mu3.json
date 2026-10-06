@@ -6,8 +6,8 @@
     "range_res_m": 1.22,
     "nms_r_gate": 16,
     "seed": 42,
-    "swerling": true,
-    "multipath": true,
+    "swerling": false,
+    "multipath": false,
     "suppress": true
   },
   "targets": [
@@ -30,34 +30,34 @@
   "detections": [
     {
       "id": 1,
-      "det_range": 301.51,
-      "det_vel": -20.09,
+      "det_range": 150.15,
+      "det_vel": 30.13,
       "mag_db": 0.0,
       "type": "true",
-      "true_range": 300.0,
-      "true_vel": -20.0
+      "true_range": 150.0,
+      "true_vel": 30.0
     },
     {
       "id": 2,
-      "det_range": 449.22,
+      "det_range": 450.44,
       "det_vel": 0.0,
-      "mag_db": -2.11,
+      "mag_db": -2.7,
       "type": "true",
       "true_range": 450.0,
       "true_vel": 0.0
     },
     {
       "id": 3,
-      "det_range": 150.15,
-      "det_vel": 30.13,
-      "mag_db": -4.73,
+      "det_range": 300.29,
+      "det_vel": -20.09,
+      "mag_db": -3.64,
       "type": "true",
-      "true_range": 150.0,
-      "true_vel": 30.0
+      "true_range": 300.0,
+      "true_vel": -20.0
     }
   ],
   "summary": {
-    "raw_cfar_count": 10,
+    "raw_cfar_count": 4,
     "nms_count": 3,
     "true_count": 3,
     "ghost_count": 0
