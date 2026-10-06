@@ -66,7 +66,8 @@ def polar_encode(info_bits: np.ndarray, N: int,
 
     # 选最不可靠的 N-K 个位置为冻结位
     z = bhattacharyya_params(n, design_snr_db)
-    frozen_indices = np.argsort(z)[:N - K]
+    # ★ z 小 = 可靠 (放信息); z 大 = 不可靠 (冻结)
+    frozen_indices = np.argsort(-z)[:N - K]
     frozen_mask = np.zeros(N, dtype=bool)
     frozen_mask[frozen_indices] = True
 

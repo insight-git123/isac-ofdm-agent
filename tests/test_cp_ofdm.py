@@ -29,7 +29,6 @@ def test_link_cp_content():
     link = CPOFDMLink(n_fft=64, cp_len=8)
     X = np.random.randn(64, 1) + 1j * np.random.randn(64, 1)
     tx = link.transmit(X)
-    # tx[:8] 应等于 IFFT 的最后 8 个采样
     time_data = np.fft.ifft(X[:, 0]) * np.sqrt(64)
     assert np.allclose(tx[:8], time_data[-8:])
 
@@ -40,16 +39,15 @@ def test_channel_frequency_response_fft():
                                fs_hz=122.88e6)
     H = ch.frequency_response(n_fft=1024)
     assert len(H) == 1024
-    # H 应等于 FFT(fir)
     H_direct = np.fft.fft(ch.fir, 1024)
     assert np.allclose(H, H_direct)
 
 
 def test_channel_matches_tdl_frequency_response():
-    """时域 FIR 的频响应与 tdl_model 的低频段一致。
+    """时域 FIR 的频响应与 tdl_model 的频响在**全频段**一致。
 
-    说明: 时域 FIR 的抽头时延被量化到采样整数倍，
-    高频子载波会有相位量化误差。故只对比前 100 个子载波 (低频段)。
+    P4.1 修复: 使用相同的 FFT 频率轴 (fftfreq 顺序)。
+    预期相关系数 > 0.95 (剩余差异来自时延量化到 8.14 ns 采样间隔)。
     """
     from src.simulation.tdl_model import tdl_frequency_response
     fs = 122.88e6
@@ -64,11 +62,20 @@ def test_channel_matches_tdl_frequency_response():
                                      rms_delay_ns=30,
                                      normalize_power=True).flatten()
 
-    # 只对比前 100 个子载波 (低频段，量化误差小)
-    n_compare = 100
-    corr = np.corrcoef(np.abs(H_time[:n_compare]),
-                       np.abs(H_freq[:n_compare]))[0, 1]
-    assert corr > 0.9, f"低频段幅度相关系数 {corr} < 0.9"
+    # 全频段对比
+    corr = np.corrcoef(np.abs(H_time), np.abs(H_freq))[0, 1]
+    # 0.95 阈值: 量化误差上限 (离散 FIR vs 连续时延)
+    # 修复频率轴前: 0.42; 修复后: > 0.95
+    assert corr > 0.95, f"全频段相关系数 {corr} < 0.95"
+
+    # 相位也应匹配 (低频段)
+    phase_diff = np.angle(H_time[:100] * np.conj(H_freq[:100]))
+    phase_diff_centered = phase_diff - np.median(phase_diff)
+        # 相位误差来自时延量化 (采样间隔 8.14 ns → 最大半采样误差 4 ns)
+    # 低频段 100 子载波 (12 MHz) 的相位误差上限 ≈ 2π·12e6·4e-9 ≈ 0.3 rad
+    max_phase_err = np.max(np.abs(phase_diff_centered))
+    assert max_phase_err < 0.3, \
+        f"相位误差过大: max={max_phase_err:.4f} (预期 < 0.3 rad)"
 
 
 def test_channel_apply_preserves_length():
@@ -101,39 +108,27 @@ def test_cp_longer_than_channel_no_isi():
     fs = 122.88e6
     scs_hz = 120e3
     n_fft = 1024
-    cp_samples = 72    # mu=3, 0.5864 us
+    cp_samples = 72
 
-    # CP 足够覆盖 30ns RMS 信道
     link = CPOFDMLink(n_fft=n_fft, cp_len=cp_samples)
     ch = TimeDomainTDLChannel(model="TDL-A", rms_delay_ns=30, fs_hz=fs)
 
-    # 构造频域数据
     X = (np.random.randn(n_fft, 4) + 1j * np.random.randn(n_fft, 4)) / np.sqrt(2)
 
-    # 发射 → 信道 → 接收
     tx = link.transmit(X)
     rx = ch.apply(tx)
     X_rx = link.receive(rx, n_symbols=4)
 
-    # 理论: X_rx ≈ H · X (逐子载波)
     H_theory = ch.frequency_response(n_fft)
     X_expected = X * H_theory.reshape(-1, 1)
 
-        # 相对误差 (忽略边界符号影响)
     err = np.mean(np.abs(X_rx[:, 1:-1] - X_expected[:, 1:-1]) ** 2) / \
           np.mean(np.abs(X_expected) ** 2)
     assert err < 0.01, f"CP 长度不足导致误差 {err}"
 
 
 def test_cp_shorter_than_channel_increases_isi():
-    """CP 长度不足时，误差应显著大于 CP 充足的场景。
-
-    物理说明:
-    - 信道最大时延 ≈ 36 采样
-    - CP=72: 完全覆盖, 无 ISI
-    - CP=4: 覆盖不足, ~32/1024 采样被前符号污染
-    - 预期: CP 短时误差比 CP 长时高 10 倍以上
-    """
+    """CP 长度不足时，误差应显著大于 CP 充足的场景。"""
     from src.simulation.modulation import modulate
     fs = 122.88e6
     n_fft = 1024
@@ -141,7 +136,6 @@ def test_cp_shorter_than_channel_increases_isi():
     ch = TimeDomainTDLChannel(model="TDL-A", rms_delay_ns=30, fs_hz=fs)
     H_theory = ch.frequency_response(n_fft)
 
-    # 固定随机数据 (保证公平对比)
     rng = np.random.default_rng(42)
     qpsk_flat = modulate(n_fft * 4, "qpsk", rng=rng)
     X = qpsk_flat.reshape(n_fft, 4)
@@ -155,8 +149,8 @@ def test_cp_shorter_than_channel_increases_isi():
         return float(np.mean(np.abs(X_rx[:, 1:3] - X_expected[:, 1:3]) ** 2) /
                      np.mean(np.abs(X_expected) ** 2))
 
-    err_long = measure_error(72)   # CP 充足
-    err_short = measure_error(4)   # CP 过短
+    err_long = measure_error(72)
+    err_short = measure_error(4)
 
     print(f"\n  CP=72 (充足): err = {err_long:.4e}")
     print(f"  CP=4 (过短): err = {err_short:.4e}")
@@ -169,6 +163,5 @@ def test_cp_shorter_than_channel_increases_isi():
 def test_fir_maximum_delay():
     """FIR 滤波器最大时延应与 TDL-A 标准一致。"""
     ch = TimeDomainTDLChannel(model="TDL-A", rms_delay_ns=30, fs_hz=122.88e6)
-    # TDL-A 最大归一化时延 9.6586 * 30 ns = 289.76 ns
-    expected_samples = int(round(289.76e-9 * 122.88e6))  # ≈ 36
+    expected_samples = int(round(289.76e-9 * 122.88e6))
     assert ch.maximum_delay_samples() == expected_samples

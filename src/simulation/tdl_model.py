@@ -131,8 +131,15 @@ def tdl_frequency_response(fft_size: int, scs_hz: float, model: str = "TDL-A",
                            normalize_power: bool = True) -> np.ndarray:
     """TDL 信道的频域响应 H[k]，维度 = (fft_size, 1)。
 
+    ★ P4.1 修复: FFT 频率轴必须与 OFDM 子载波索引对齐。
+
+    数学推导:
+      OFDM 的 IFFT: x[n] = (1/sqrt(N)) * sum_k X[k] * exp(j*2*pi*k*n/N)
+      所以 X[k] 对应的基带频率是 fftfreq(N) * fs
+      其中 fs = N * scs_hz
+      即 f_k = [0, SCS, ..., (N/2-1)*SCS, -N/2*SCS, ..., -SCS]
+
     物理: H(f) = sum_p amp_p * exp(-j*2*pi*f*tau_p)
-    用于频域模型: Y = X * H + noise
     """
     taps, _ = get_tdl_taps(model, rms_delay_ns)
 
@@ -141,13 +148,15 @@ def tdl_frequency_response(fft_size: int, scs_hz: float, model: str = "TDL-A",
         powers_linear = powers_linear / np.sum(powers_linear)
     amps = np.sqrt(powers_linear)
 
-    # 子载波频率
-    freqs = np.arange(fft_size).reshape(-1, 1) * scs_hz  # (fft_size, 1)
+    # ★ 用 fftfreq 生成正确排序的子载波频率轴 (不加 ifftshift)
+    freq_axis = np.fft.fftfreq(
+        fft_size, d=1.0 / (fft_size * scs_hz)
+    ).reshape(-1, 1)
 
     H = np.zeros((fft_size, 1), dtype=complex)
     for amp, delay_ns in zip(amps, [d for d, _ in taps]):
         tau = delay_ns * 1e-9
-        H += amp * np.exp(-1j * 2 * np.pi * freqs * tau)
+        H += amp * np.exp(-1j * 2 * np.pi * freq_axis * tau)
     return H
 
 

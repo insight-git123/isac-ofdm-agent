@@ -40,7 +40,9 @@ def main():
     ]
 
     scenarios = ["AWGN", "SinglePath", "TDL-A"]
-    snr_range = [-20, -15, -10, -5, 0, 5, 10]
+    # 相干增益 = 1024 (距离) × 512 (多普勒) ≈ 57 dB
+    # 要看到 S 型检测曲线, 输入 SNR 需在 -70 ~ -40 dB
+    snr_range = [-70, -65, -60, -55, -50, -45, -40]
 
     print(f"[Task4-Baseline] 基准场景对比 (mu={args.mu}, SCS={scs_khz}kHz)")
     print(f"  场景: {scenarios}")

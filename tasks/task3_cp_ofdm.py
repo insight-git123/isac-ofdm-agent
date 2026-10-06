@@ -81,7 +81,11 @@ def main():
     H_est_mean = H_est.mean(axis=1)
 
     # 只对比低频段 (量化误差小)
-    n_low = 100
+       # P4.1: 全频段对比 (频率轴修复后应对齐)
+    n_low = args.n_fft
+    corr = np.corrcoef(np.abs(H_est_mean[:n_low]),
+                       np.abs(H_ref[:n_low]))[0, 1]
+    print(f"    全频段 ({n_low} 子载波) 幅度相关系数: {corr:.4f}")
     corr = np.corrcoef(np.abs(H_est_mean[:n_low]),
                        np.abs(H_ref[:n_low]))[0, 1]
     print(f"    低频段 (前 {n_low} 子载波) 幅度相关系数: {corr:.4f}")
