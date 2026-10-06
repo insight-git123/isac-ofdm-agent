@@ -33,10 +33,9 @@ def simulate_polar(K: int, N: int, snr_range: list,
         total_bits = 0
         for _ in range(n_blocks):
             info = rng.integers(0, 2, size=K)
-            codeword, frozen, crc_type = polar_encode(info, N, crc_type="CRC11")
-            # 保存 crc_type 供译码用
+            codeword, frozen, _ = polar_encode(info, N, crc_type=None)
             llr = _bpsk_awgn_llr(codeword, snr, rng)
-            decoded = polar_decode(llr, frozen, K, crc_type=crc_type)
+            decoded = polar_decode(llr, frozen, K, crc_type=None)
             if len(decoded) < K:
                 total_err += K
             else:

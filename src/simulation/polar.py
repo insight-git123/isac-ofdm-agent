@@ -49,40 +49,30 @@ def polar_transform(u: np.ndarray) -> np.ndarray:
 
 def polar_encode(info_bits: np.ndarray, N: int,
                  design_snr_db: float = 0.0,
-                 crc_type: str = "CRC11") -> tuple:
-    """Polar 编码 (含 CRC 辅助, 3GPP NR 风格)。
+                 crc_type: str = None) -> tuple:
+    """Polar 编码。
 
     Args:
-        info_bits: K 个信息比特
-        N: 码长 (2 的幂)
-        design_snr_db: 保留参数 (PW 序列不用)
-        crc_type: CRC 类型, 默认 CRC11 (3GPP NR 小 K 用)
-
-    Returns:
-        (codeword, frozen_mask, crc_type): 码字 + 冻结位掩码 + CRC 类型
+        crc_type: None = 无 CRC (SC 用); "CRC11" 等 = 加 CRC (SCL 用)
     """
-    from src.simulation.crc import crc_encode, CRC_POLYNOMIALS
     from src.simulation.polar_sequence import get_frozen_set
 
     n = int(np.log2(N))
-    assert 2**n == N, f"N={N} 必须是 2 的幂"
-
+    assert 2**n == N
     K = len(info_bits)
-    crc_len, _ = CRC_POLYNOMIALS[crc_type]
 
-    # 信息比特 + CRC 位
-    bits_with_crc = crc_encode(info_bits, crc_type)   # 长度 K + crc_len
-    K_with_crc = len(bits_with_crc)
+    if crc_type is None:
+        bits_payload = info_bits
+    else:
+        from src.simulation.crc import crc_encode
+        bits_payload = crc_encode(info_bits, crc_type)
 
-    assert K_with_crc <= N, f"K + CRC = {K_with_crc} 超过 N = {N}"
+    K_payload = len(bits_payload)
+    frozen_mask = get_frozen_set(N, K_payload)
 
-    # 用 PW 序列选冻结位
-    frozen_mask = get_frozen_set(N, K_with_crc)
-
-    # 放比特到非冻结位置
     u = np.zeros(N, dtype=int)
     info_positions = np.where(~frozen_mask)[0]
-    u[info_positions[:K_with_crc]] = bits_with_crc
+    u[info_positions[:K_payload]] = bits_payload
 
     x = polar_transform(u)
     return x, frozen_mask, crc_type
@@ -134,34 +124,21 @@ def _sc_recursive(llr: np.ndarray, frozen: np.ndarray) -> np.ndarray:
 
 def polar_decode(llr: np.ndarray, frozen_mask: np.ndarray,
                  info_bit_count: int,
-                 crc_type: str = "CRC11",
+                 crc_type: str = None,
                  use_sc: bool = True) -> np.ndarray:
-    """Polar SC 译码 (含 CRC 校验)。
-
-    Args:
-        llr: 码字级 LLR
-        frozen_mask: 冻结位标志
-        info_bit_count: 原始信息比特数 (不含 CRC)
-        crc_type: CRC 类型
-        use_sc: True 用 SC 译码; (SCL 留待 Phase 2)
-
-    Returns:
-        译码后的信息比特 (不含 CRC)
-    """
-    from src.simulation.crc import crc_check, remove_crc, CRC_POLYNOMIALS
+    """Polar SC 译码。"""
+    from src.simulation.crc import remove_crc, CRC_POLYNOMIALS
 
     llr = np.asarray(llr, dtype=float)
     frozen_mask = np.asarray(frozen_mask, dtype=bool)
 
-    # SC 译码得到 u_hat
     u_hat = _sc_recursive(llr, frozen_mask)
-
-    # 提取非冻结位的比特
     info_positions = np.where(~frozen_mask)[0]
+
+    if crc_type is None:
+        return u_hat[info_positions[:info_bit_count]]
+
     crc_len, _ = CRC_POLYNOMIALS[crc_type]
     K_with_crc = info_bit_count + crc_len
-
     bits_with_crc = u_hat[info_positions[:K_with_crc]]
-
-    # 去 CRC
     return remove_crc(bits_with_crc, crc_type)[:info_bit_count]
