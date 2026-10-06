@@ -98,12 +98,8 @@ def _g_llr(a: np.ndarray, b: np.ndarray, u: np.ndarray) -> np.ndarray:
 def _sc_recursive(llr: np.ndarray, frozen: np.ndarray) -> np.ndarray:
     """递归 SC 译码。
 
-    Args:
-        llr: 当前子块的 LLR 数组 (长度 n)
-        frozen: 对应的冻结位标志 (长度 n)
-
-    Returns:
-        u_hat: 该子块在 u 域的估计比特 (长度 n)
+    关键: g 函数需要左子块的 partial sum (x_left = F·u_left),
+    而不是 u 域判决本身。
     """
     n = len(llr)
 
@@ -118,8 +114,11 @@ def _sc_recursive(llr: np.ndarray, frozen: np.ndarray) -> np.ndarray:
     llr_left = _f_llr(llr[:half], llr[half:])
     u_left = _sc_recursive(llr_left, frozen[:half])
 
-    # 右半: g 函数 (用左半的判决)
-    llr_right = _g_llr(llr[:half], llr[half:], u_left)
+    # ★ partial sum: u_left → x_left
+    x_left = polar_transform(u_left)
+
+    # 右半: g 函数 (用 x_left)
+    llr_right = _g_llr(llr[:half], llr[half:], x_left)
     u_right = _sc_recursive(llr_right, frozen[half:])
 
     return np.concatenate([u_left, u_right])

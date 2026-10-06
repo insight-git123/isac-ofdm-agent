@@ -22,89 +22,94 @@ def _bpsk_awgn_llr(bits, snr_db, rng):
     return 2 * rx / sigma**2
 
 
-def simulate_polar(K: int, N: int, snr_range: list, n_trials: int = 20,
-                   seed: int = 42) -> dict:
-    """Polar 码 BER 仿真。"""
+def simulate_polar(K: int, N: int, snr_range: list,
+                   n_bits_per_point: int = 5000, seed: int = 42) -> dict:
+    """Polar 码 BER 仿真 (大块数据)。"""
     rng = np.random.default_rng(seed)
     bers = []
     for snr in snr_range:
-        errs = []
-        for _ in range(n_trials):
+        n_blocks = max(1, n_bits_per_point // K)
+        total_err = 0
+        total_bits = 0
+        for _ in range(n_blocks):
             info = rng.integers(0, 2, size=K)
             codeword, frozen = polar_encode(info, N, design_snr_db=snr)
             llr = _bpsk_awgn_llr(codeword, snr, rng)
             decoded = polar_decode(llr, frozen, K)
             if len(decoded) < K:
-                errs.append(1.0)
+                total_err += K
             else:
-                errs.append(float(np.mean(info != decoded[:K])))
-        bers.append(float(np.mean(errs)))
+                total_err += int(np.sum(info != decoded[:K]))
+            total_bits += K
+        bers.append(total_err / total_bits)
     return {"snr": snr_range, "ber": bers, "scheme": "Polar"}
 
 
-def simulate_ldpc(snr_range: list, n_trials: int = 20, seed: int = 42) -> dict:
-    """LDPC 码 BER 仿真。"""
+def simulate_ldpc(snr_range: list, n_bits_per_point: int = 5000,
+                  seed: int = 42) -> dict:
+    """LDPC 码 BER 仿真 (大块数据)。"""
     rng = np.random.default_rng(seed)
-    code = RegularLDPC(n_var=96, dv=3, dc=6)   # 率 1/2, K=48
+    code = RegularLDPC(n_var=96, dv=3, dc=6)
     K_actual = code.K
 
     bers = []
     for snr in snr_range:
-        errs = []
-        for _ in range(n_trials):
+        n_blocks = max(1, n_bits_per_point // K_actual)
+        total_err = 0
+        total_bits = 0
+        for _ in range(n_blocks):
             info = rng.integers(0, 2, size=K_actual)
             codeword = code.encode(info)
             llr = _bpsk_awgn_llr(codeword, snr, rng)
             decoded = code.decode(llr, n_iter=30)
             if len(decoded) != K_actual:
-                errs.append(1.0)
+                total_err += K_actual
             else:
-                errs.append(float(np.mean(info != decoded)))
-        bers.append(float(np.mean(errs)))
+                total_err += int(np.sum(info != decoded))
+            total_bits += K_actual
+        bers.append(total_err / total_bits)
     return {"snr": snr_range, "ber": bers,
             "scheme": f"LDPC (N={code.N}, K={K_actual})"}
 
 
-def simulate_uncoded(K: int, snr_range: list, n_trials: int = 20,
+def simulate_uncoded(K: int, snr_range: list, n_bits_per_point: int = 5000,
                      seed: int = 42) -> dict:
-    """未编码 BPSK 的 BER。"""
+    """未编码 BPSK 的 BER (大块数据)。"""
     rng = np.random.default_rng(seed)
     bers = []
     for snr in snr_range:
-        errs = []
-        for _ in range(n_trials):
-            info = rng.integers(0, 2, size=K)
-            llr = _bpsk_awgn_llr(info, snr, rng)
-            decoded = (llr < 0).astype(int)
-            errs.append(float(np.mean(info != decoded)))
-        bers.append(float(np.mean(errs)))
+        info = rng.integers(0, 2, size=n_bits_per_point)
+        llr = _bpsk_awgn_llr(info, snr, rng)
+        decoded = (llr < 0).astype(int)
+        bers.append(float(np.mean(info != decoded)))
     return {"snr": snr_range, "ber": bers, "scheme": "Uncoded"}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n-trials", type=int, default=10)
+    parser.add_argument("--n-bits", type=int, default=5000,
+                        help="每个 SNR 点的比特数")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     print(f"[Task2-Polar-LDPC] 编码方案 BER 对比")
     print(f"  Polar: N=128, K=64, SC 译码")
     print(f"  LDPC:  N=96,  K=48, Min-Sum 译码")
-    print(f"  MC: {args.n_trials} 次/点\n")
+    print(f"  每点: {args.n_bits} 比特\n")
 
     snr_range = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
     print("  [1/3] Polar 码...")
     res_polar = simulate_polar(K=64, N=128, snr_range=snr_range,
-                                n_trials=args.n_trials, seed=args.seed)
+                                n_bits_per_point=args.n_bits, seed=args.seed)
 
     print("  [2/3] LDPC 码...")
     res_ldpc = simulate_ldpc(snr_range=snr_range,
-                              n_trials=args.n_trials, seed=args.seed)
+                              n_bits_per_point=args.n_bits, seed=args.seed)
 
     print("  [3/3] 未编码...")
     res_uncoded = simulate_uncoded(K=64, snr_range=snr_range,
-                                    n_trials=args.n_trials, seed=args.seed)
+                                    n_bits_per_point=args.n_bits, seed=args.seed)
 
     print("\n" + "=" * 70)
     print(f"{'SNR(dB)':<10}{'Uncoded':<15}{'Polar':<15}{'LDPC':<15}")
