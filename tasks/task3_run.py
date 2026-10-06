@@ -178,8 +178,63 @@ def main():
 
     print(f"\n[output] {plot_path}")
 
+    # ================= 8.5 鬼影抑制评估 (P4.4) =================
+    R_TOL = max(5.0, 2 * range_res_m)   # ← 提前到 8.5 节之前
+    suppression_metrics = None
+    if args.suppress and len(det_ranges) > 0:
+        # 真值匹配函数 (检测点是否落在真值附近)
+        def is_true_target(r, v):
+            return any(
+                abs(r - t["range"]) <= R_TOL and abs(v - t["velocity"]) <= 15.0
+                for t in targets
+            )
+
+        # 混淆矩阵
+        TP = 0   # 保留的点中, 确实是真实目标
+        FP = 0   # 保留的点中, 实际是鬼影 (误保留)
+        FN = 0   # 抑制的点中, 实际是真实目标 (误抑制)
+        TN = 0   # 抑制的点中, 确实是鬼影
+
+        for i in true_idx:
+            if is_true_target(det_ranges[i], det_velocities[i]):
+                TP += 1
+            else:
+                FP += 1
+
+        for i in ghost_idx:
+            if is_true_target(det_ranges[i], det_velocities[i]):
+                FN += 1   # ❌ 误抑制了真实目标
+            else:
+                TN += 1   # ✅ 正确抑制了鬼影
+
+        precision = TP / max(TP + FP, 1)   # 保留点中真实目标的纯度
+        recall = TP / max(TP + FN, 1)      # 真实目标的保留率
+        f1 = 2 * precision * recall / max(precision + recall, 1e-12)
+        ghost_rejection_rate = TN / max(TN + FP, 1)  # 鬼影剔除率
+
+        # 真值总数 (用于计算误抑制率)
+        n_true_targets = len(targets)
+        false_suppression_rate = FN / max(n_true_targets, 1)
+
+        suppression_metrics = {
+            "TP": TP, "FP": FP, "FN": FN, "TN": TN,
+            "precision": round(precision, 3),
+            "recall": round(recall, 3),
+            "f1": round(f1, 3),
+            "ghost_rejection_rate": round(ghost_rejection_rate, 3),
+            "false_suppression_rate": round(false_suppression_rate, 3),
+        }
+
+        print(f"\n  === 鬼影抑制评估 (P4.4) ===")
+        print(f"  TP={TP} (保留真实)   FP={FP} (误保留鬼影)")
+        print(f"  FN={FN} (误抑制真实)  TN={TN} (正确剔除鬼影)")
+        print(f"  Precision = {precision:.3f}  (保留点中真实目标纯度)")
+        print(f"  Recall    = {recall:.3f}  (真实目标保留率)")
+        print(f"  F1        = {f1:.3f}")
+        print(f"  误抑制率  = {false_suppression_rate:.3f}")
+
     # ================= 9. 保存 result.json (P2.2) =================
-    R_TOL = max(5.0, 2 * range_res_m)
+   
 
     def match_type(det_r, det_v):
         for t in targets:
@@ -226,6 +281,7 @@ def main():
             "true_count": sum(1 for d in detections_json if d["type"] == "true"),
             "ghost_count": sum(1 for d in detections_json if d["type"] == "ghost"),
         },
+        "suppression_metrics": suppression_metrics,   # ← 新增这一行
     }
     json_path = out_dir / f"result_mu{args.mu}.json"
     json_path.write_text(json.dumps(result_json, indent=2, ensure_ascii=False),

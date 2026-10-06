@@ -30,7 +30,7 @@
   "detections": [
     {
       "id": 1,
-      "det_range": 300.29,
+      "det_range": 301.51,
       "det_vel": -20.09,
       "mag_db": 0.0,
       "type": "true",
@@ -39,9 +39,9 @@
     },
     {
       "id": 2,
-      "det_range": 450.44,
+      "det_range": 449.22,
       "det_vel": 0.0,
-      "mag_db": -1.84,
+      "mag_db": -2.11,
       "type": "true",
       "true_range": 450.0,
       "true_vel": 0.0
@@ -50,16 +50,27 @@
       "id": 3,
       "det_range": 150.15,
       "det_vel": 30.13,
-      "mag_db": -5.24,
+      "mag_db": -4.73,
       "type": "true",
       "true_range": 150.0,
       "true_vel": 30.0
     }
   ],
   "summary": {
-    "raw_cfar_count": 3,
+    "raw_cfar_count": 10,
     "nms_count": 3,
     "true_count": 3,
     "ghost_count": 0
+  },
+  "suppression_metrics": {
+    "TP": 3,
+    "FP": 0,
+    "FN": 0,
+    "TN": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "ghost_rejection_rate": 0.0,
+    "false_suppression_rate": 0.0
   }
 }
