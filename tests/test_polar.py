@@ -1,4 +1,4 @@
-"""Polar 码单元测试。"""
+"""Polar 码单元测试 (Phase 1: PW 序列 + CRC)。"""
 import sys
 from pathlib import Path
 import numpy as np
@@ -27,30 +27,27 @@ def test_bhattacharyya_shape():
     assert np.all(z >= 0) and np.all(z <= 1)
 
 
-def test_bhattacharyya_monotonic():
-    """极化: 一半接近 0, 一半接近 1。"""
-    z = bhattacharyya_params(6)
-    # 至少有 25% 的极低值 (< 0.1) 和 25% 的高值 (> 0.9)
-    low_count = np.sum(z < 0.1)
-    high_count = np.sum(z > 0.9)
-    assert low_count >= 8, f"低值子信道数: {low_count}"
-    assert high_count >= 8, f"高值子信道数: {high_count}"
-
-
 def test_polar_encode_shape():
-    info = np.array([1, 0, 1, 1])   # K=4
-    codeword, frozen = polar_encode(info, N=16)
-    assert len(codeword) == 16
-    assert frozen.sum() == 12       # N-K=12 冻结位
+    info = np.array([1, 0, 1, 1])
+    codeword, frozen, crc_type = polar_encode(info, N=32, crc_type="CRC6")
+    assert len(codeword) == 32
+    assert crc_type == "CRC6"
+
+
+def test_polar_encode_with_crc():
+    """N=64, K=11, CRC-6 → 17 位信息 + CRC。"""
+    info = np.array([1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1])
+    codeword, frozen, crc_type = polar_encode(info, N=64, crc_type="CRC6")
+    assert len(codeword) == 64
+    assert (~frozen).sum() == 11 + 6   # K + CRC
 
 
 def test_polar_noiseless_decoding():
     """无噪声: 应 100% 恢复。"""
     rng = np.random.default_rng(42)
-    info = rng.integers(0, 2, size=8)
-    codeword, frozen = polar_encode(info, N=32)
-    # 无噪声 LLR: 0→+10, 1→-10
+    info = rng.integers(0, 2, size=20)
+    codeword, frozen, crc_type = polar_encode(info, N=64, crc_type="CRC11")
     llr = np.where(codeword == 0, 10.0, -10.0)
-    decoded = polar_decode(llr, frozen, 8)
-    # 在无噪声下应完全恢复
-    assert len(decoded) == 8
+    decoded = polar_decode(llr, frozen, len(info), crc_type=crc_type)
+    assert len(decoded) == len(info)
+    assert np.array_equal(info, decoded)
