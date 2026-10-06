@@ -21,7 +21,7 @@
 | **Task3** | ISAC 感知 | 时域脉冲压缩 + TDL-A (23 抽头) + Swerling-I + CFAR + NMS + 鬼影抑制 + MIMO 3D RDA + CP-OFDM 全链路 |
 | **Task4** | 性能扫描 | 蒙特卡洛 (50 次) + 95% CI + 分辨率公式验证 |
 | **Task5** | 自动报告 | 从 JSON 动态生成 |
-| **P3 附加** | 进阶 | (2,1,3) 卷积码 + Viterbi + ULA/UPA 阵列 |
+| **P3/P4 附加** | 进阶 | (2,1,3) 卷积码 + **Polar SC** + **LDPC Min-Sum** + ULA/UPA + **统一 CLI** |
 
 ### 修复状态
 
@@ -29,6 +29,7 @@
 - ✅ **P1**：TDL-A 23 抽头 + 功率域 CA-CFAR (Pfa 校准)
 - ✅ **P2**：QPSK/16QAM 调制 + 动态报告 + 95% CI + NR 资源网格
 - ✅ **P3**：MIMO 3D RDA + 卷积码 + SS/PBCH + CP-OFDM 全链路
+- ✅ **P4**（进阶）：TDL FFT 修正 + Bootstrap/Wilson CI + MIMO RMSE + 统一 CLI + Polar/LDPC
 
 ## 主要结果
 
@@ -62,6 +63,18 @@
 ### 卷积编码 BER 曲线
 
 ![BER Curve](outputs/task2/coding_ber_curve.png)
+
+### Polar vs LDPC BER 对比 (P4.8)
+
+![Polar LDPC](outputs/task2/polar_ldpc_ber.png)
+
+### MIMO 角度 RMSE vs 天线数 (P4.6)
+
+![MIMO Metrics](outputs/task3/mimo_metrics.png)
+
+### 基准场景对比 (P4.5)
+
+![Baseline](outputs/task4/baseline_comparison.png)
 
 ### CP-OFDM 全链路
 
